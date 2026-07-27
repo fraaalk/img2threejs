@@ -10,7 +10,10 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
+from forge.stage2_spec.cs2_adapters import get_family_adapter, resolve_family_adapter  # noqa: E402
 from status_banner import emit_status
 
 
@@ -721,10 +724,7 @@ CS2_KNIFE_SUBTYPES = frozenset(
 
 
 def make_cs2_component_tree(item_family: str = "knife", subtype: str | None = None) -> list:
-    if item_family != "knife":
-        raise ValueError(f"unsupported CS2 family {item_family!r}; only knife is implemented")
-    if subtype and subtype not in CS2_KNIFE_SUBTYPES:
-        raise ValueError(f"unsupported CS2 knife subtype {subtype!r}")
+    adapter = get_family_adapter(item_family) if item_family == "knife" and subtype is None else resolve_family_adapter(item_family, subtype)
     # Root is an organizing group only: use the invisible 'hidden' material (opacity 0) exactly
     # like the character template, so the generator's per-component mesh for root never renders as
     # a stray box over the weapon -- no generic generator change needed.
@@ -739,10 +739,18 @@ def make_cs2_component_tree(item_family: str = "knife", subtype: str | None = No
         _cs2node("pommel", "Pommel", "sphere", (0, -0.95, 0), (0.2, 0.2, 0.2), "substrate", "pommel", "meso", 0.6),
         _cs2node("bolster", "Bolster", "box", (0, 0.02, 0), (0.2, 0.18, 0.26), "substrate", "bolster", "meso", 0.6),
     ]
-    return [root, *parts]
+    if adapter.family == "knife":
+        return [root, *parts]
+    if adapter.family == "pistol":
+        return [root, _cs2node("slide", "Slide", "extrude", (0, 0.35, 0), (0.9, 0.3, 0.22), "skin-finish", "slide", "macro", 1.0), _cs2node("frame", "Frame", "box", (0, -0.15, 0), (0.72, 0.38, 0.3), "skin-finish", "frame", "macro", 1.0), _cs2node("trigger-guard", "Trigger guard", "torus", (0, -0.28, 0.08), (0.2, 0.18, 0.12), "substrate", "trigger-guard", "meso", 0.9), _cs2node("barrel", "Barrel", "cylinder", (0.82, 0.35, 0), (0.18, 0.18, 0.48), "substrate", "barrel", "meso", 0.8), _cs2node("magazine", "Magazine", "box", (0, -0.62, 0), (0.28, 0.16, 0.45), "skin-finish", "magazine", "meso", 0.8), _cs2node("sights", "Sights", "box", (0.15, 0.65, 0), (0.24, 0.08, 0.08), "substrate", "sights", "micro", 0.7)]
+    return [root, _cs2node("receiver", "Receiver", "box", (0, 0.0, 0), (1.0, 0.35, 0.35), "skin-finish", "receiver", "macro", 1.0), _cs2node("barrel", "Barrel", "cylinder", (1.35, 0.0, 0), (1.35, 0.12, 0.12), "substrate", "barrel", "macro", 1.0), _cs2node("scope", "Scope", "cylinder", (0.0, 0.4, 0), (0.5, 0.14, 0.14), "substrate", "scope", "meso", 0.9), _cs2node("stock", "Stock", "box", (-1.15, 0.0, 0), (0.65, 0.3, 0.3), "skin-finish", "stock", "macro", 0.9), _cs2node("magazine", "Magazine", "box", (0.0, -0.45, 0), (0.25, 0.15, 0.45), "substrate", "magazine", "meso", 0.8), _cs2node("bipod", "Bipod", "cylinder", (0.65, -0.35, 0), (0.12, 0.12, 0.38), "substrate", "bipod", "meso", 0.7), _cs2node("bolt", "Bolt", "cylinder", (-0.25, 0.35, 0), (0.1, 0.1, 0.3), "substrate", "bolt", "micro", 0.7)]
 
 
-def make_cs2_feature_targets() -> list:
+def make_cs2_feature_targets(item_family: str = "knife") -> list:
+    if item_family != "knife":
+        adapter = get_family_adapter(item_family)
+        component_refs = {"pistol": ["slide", "frame", "barrel", "trigger-guard", "magazine"], "rifle": ["receiver", "barrel", "scope", "stock", "magazine", "bipod"]}[item_family]
+        return [{"id": f"cs2-{item_family}-{index}", "name": feature, "tier": "critical", "passIds": ["blockout"], "minimumScore": 0.75, "mustPass": True, "componentRefs": component_refs, "evidenceRefs": ["full-object"], "contractFeature": feature} for index, feature in enumerate(adapter.feature_targets)]
     return [
         {"id": "cs2-silhouette", "name": "Weapon silhouette and proportions", "tier": "critical",
          "passIds": ["blockout"], "minimumScore": 0.8, "mustPass": True,
@@ -786,9 +794,11 @@ def apply_cs2_template(
     if resolved_style not in CS2_FINISH_PROFILES:
         raise ValueError(f"unknown finish style {resolved_style!r}; expected one of: {', '.join(CS2_FINISH_STYLES)}")
     profile = CS2_FINISH_PROFILES[resolved_style]
+    adapter = get_family_adapter(item_family) if item_family == "knife" and subtype is None else resolve_family_adapter(item_family, subtype)
     spec["componentTree"] = make_cs2_component_tree(item_family, subtype)
     spec["materials"] = [_cs2_finish_material(resolved_style, float_value, paint_seed), _cs2_substrate_material(), _cs2_hidden_material()]
-    spec["featureReviewTargets"] = make_cs2_feature_targets()
+    spec["featureReviewTargets"] = make_cs2_feature_targets(adapter.family)
+    spec["cs2FamilyContract"] = adapter.component_tree_contract()
     # top-level signal for the pre-render environment gate (mirrors the material value)
     spec["envMapIntensity"] = profile["env"]
     spec["cs2Finish"] = {"finishStyle": resolved_style, "viewDependent": profile["viewDependent"],
@@ -831,11 +841,13 @@ def apply_cs2_template(
 
 
 def apply_cs2_manifest_evidence(spec: dict, manifest: dict) -> dict:
+    identity = manifest.get("resolvedIdentity") if isinstance(manifest.get("resolvedIdentity"), dict) else manifest
     intake = {
         "schemaVersion": manifest.get("schemaVersion"),
         "state": manifest.get("state"),
-        "itemFamily": manifest.get("itemFamily"),
-        "subtype": manifest.get("subtype"),
+        "itemFamily": identity.get("itemFamily"),
+        "subtype": identity.get("subtype"),
+        "componentAdapter": manifest.get("componentAdapter"),
         "route": manifest.get("route"),
         "exactnessTier": manifest.get("exactnessTier"),
         "identity": manifest.get("identity", {}),
@@ -1635,8 +1647,8 @@ def main(argv: list[str]) -> int:
         oc = pre.get("objectClass", {}) if isinstance(pre, dict) else {}
         domain = oc.get("primaryDomain") if isinstance(oc, dict) else None
         cs2_marker = bool(oc.get("cs2")) if isinstance(oc, dict) else False
-    has_knife_adapter = isinstance(manifest, dict) and manifest.get("componentAdapter") == "cs2-knife-v1"
-    if args.cs2 or cs2_marker or has_knife_adapter:
+    has_cs2_adapter = isinstance(manifest, dict) and isinstance(manifest.get("componentAdapter"), str) and manifest["componentAdapter"].startswith("cs2-")
+    if args.cs2 or cs2_marker or has_cs2_adapter:
         finish_style = args.finish_style
         if finish_style is None and isinstance(assessment, dict):
             oc = assessment.get("preSpecAssessment", {}).get("objectClass", {})
@@ -1650,8 +1662,8 @@ def main(argv: list[str]) -> int:
             float_value=args.cs2_float,
             paint_seed=args.paint_seed,
             environment_available=not args.no_environment,
-            item_family=str(manifest.get("itemFamily", "knife")) if manifest else "knife",
-            subtype=str(manifest["subtype"]) if manifest and manifest.get("subtype") else None,
+            item_family=str((manifest.get("resolvedIdentity") or {}).get("itemFamily", manifest.get("itemFamily", "knife"))) if manifest else "knife",
+            subtype=str((manifest.get("resolvedIdentity") or {}).get("subtype", manifest.get("subtype"))) if manifest and ((manifest.get("resolvedIdentity") or {}).get("subtype") or manifest.get("subtype")) else None,
         )
         if manifest:
             apply_cs2_manifest_evidence(spec, manifest)

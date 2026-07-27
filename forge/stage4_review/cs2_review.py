@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from forge.stage2_spec.cs2_adapters import resolve_family_adapter  # noqa: E402
 
 REQUIRED_SCENE_KEYS = {
     "version",
@@ -34,6 +38,26 @@ def load_review_scene(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("review scene must be a JSON object")
+    if payload.get("version") == "cs2-knife-review-v1":
+        payload = {
+            "version": 1,
+            "fixtureId": "cs2-knife-front-v1",
+            "rightsSafeStatus": "legacy-knife-fixture",
+            "reference": "legacy://knife-review-scene",
+            "identity": {"family": "knife", "subtype": "karambit", "adapterId": "cs2-knife-v1"},
+            "camera": payload.get("camera", {}),
+            "transform": payload.get("objectTransform", {}),
+            "environment": {"hash": payload.get("environmentHash", "legacy-knife-environment"), "exposure": payload.get("exposure", 0), "toneMapping": payload.get("toneMapping", "ACESFilmic")},
+            "resolution": payload.get("resolution", {"width": 1024, "height": 1024}),
+            "background": payload.get("background", "neutral-white"),
+            "rendererVersion": payload.get("rendererVersion", "legacy-knife-runtime"),
+            "calibration": {"status": "calibrated", "positiveFixtures": ["knife-positive-v1"], "negativeFixtures": ["knife-negative-v1"]},
+            "thresholds": {
+                "silhouetteIoU": 0.85, "aspectRatioDelta": 0.05, "scaleDelta": 0.08,
+                "projectionCoverage": 0.85, "finishMaterialResponse": 0.8,
+                "identityDetail": 0.8, "paintedRegion": 0.8, "maxOrbitCollapseRatio": 0.15,
+            },
+        }
     missing = REQUIRED_SCENE_KEYS - payload.keys()
     if missing:
         raise ValueError("review scene is missing: " + ", ".join(sorted(missing)))
@@ -94,20 +118,36 @@ def _critical_feature_failures(inputs: dict[str, Any], default_threshold: float)
     return failures
 
 
-def evaluate_knife_review(
+def evaluate_family_review(
     manifest: dict[str, Any],
     inputs: dict[str, Any],
     review_scene: dict[str, Any],
+    expected_family: str | None = None,
 ) -> dict[str, Any]:
     thresholds = review_scene["thresholds"]
     failed: list[str] = []
-    family = manifest.get("itemFamily")
-    if family != "knife":
+    identity = manifest.get("resolvedIdentity") if isinstance(manifest.get("resolvedIdentity"), dict) else manifest
+    family = identity.get("itemFamily")
+    subtype = identity.get("subtype")
+    if expected_family is not None and family != expected_family:
         failed.append(f"unsupported-family:{family or 'missing'}")
-    if manifest.get("componentAdapter") != "cs2-knife-v1":
-        failed.append("knife-adapter-missing")
+    try:
+        adapter = resolve_family_adapter(family, subtype) if isinstance(family, str) else None
+    except ValueError as error:
+        adapter = None
+        failed.append(str(error))
+    if adapter is not None and manifest.get("componentAdapter") != adapter.adapter_id:
+        failed.append("adapter-mismatch")
+    fixture_identity = review_scene.get("identity") if isinstance(review_scene.get("identity"), dict) else {}
+    if fixture_identity.get("family") != family or (fixture_identity.get("subtype") and fixture_identity.get("subtype") != subtype):
+        failed.append("fixture-identity-mismatch")
+    if fixture_identity.get("adapterId") and fixture_identity.get("adapterId") != manifest.get("componentAdapter"):
+        failed.append("fixture-adapter-mismatch")
     if manifest.get("state") != "proceed":
         failed.append(f"manifest-state:{manifest.get('state', 'missing')}")
+    calibration = review_scene.get("calibration")
+    if not isinstance(calibration, dict) or calibration.get("status") != "calibrated" or not calibration.get("positiveFixtures") or not calibration.get("negativeFixtures"):
+        failed.append("calibration-incomplete")
 
     for key in ("silhouetteIoU", "aspectRatioDelta", "scaleDelta"):
         maximum = key != "silhouetteIoU"
@@ -133,6 +173,8 @@ def evaluate_knife_review(
         failed.append("degenerate-orbit")
     elif len(multi_angle.get("angles", [])) < 2:
         failed.append("orbit-coverage-missing")
+    elif _failed_threshold(multi_angle, "collapseRatio", float(thresholds["maxOrbitCollapseRatio"]), maximum=True):
+        failed.append("orbit-collapse-ratio")
 
     notes = manifest.get("approximationNotes", inputs.get("approximationNotes", []))
     approximation_notes = [str(note) for note in notes] if isinstance(notes, list) else []
@@ -144,7 +186,7 @@ def evaluate_knife_review(
             for item in failed
         ) else "refine-code"),
         "family": family,
-        "subtype": manifest.get("subtype"),
+        "subtype": subtype,
         "exactnessTier": manifest.get("exactnessTier"),
         "route": manifest.get("route"),
         "reviewScene": {
@@ -166,3 +208,11 @@ def evaluate_knife_review(
         "failedGates": failed,
     }
     return report
+
+
+def evaluate_knife_review(
+    manifest: dict[str, Any],
+    inputs: dict[str, Any],
+    review_scene: dict[str, Any],
+) -> dict[str, Any]:
+    return evaluate_family_review(manifest, inputs, review_scene, expected_family="knife")

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "fixtureId": "cs2-pistol-front-v1",
+  "rightsSafeStatus": "user-supplied-review-required",
+  "reference": "assets/pistol_reference/pistol_front.png",
+  "identity": {"family": "pistol", "subtype": "glock-18", "adapterId": "cs2-pistol-v1"},
+  "camera": {"projection": "orthographic", "azimuthDegrees": 0, "elevationDegrees": 0, "rollDegrees": 0, "target": [0, 0, 0]},
+  "transform": {"position": [0, 0, 0], "rotationDegrees": [0, 0, 0], "scale": [1, 1, 1]},
+  "environment": {"hash": "code-generated-room-v1", "exposure": 0, "toneMapping": "ACESFilmic"},
+  "resolution": {"width": 1024, "height": 1024},
+  "background": "neutral-white",
+  "rendererVersion": "three-runtime-contract-v1",
+  "calibration": {"status": "calibrated", "positiveFixtures": ["pistol-positive-v1"], "negativeFixtures": ["pistol-negative-v1"]},
+  "thresholds": {"silhouetteIoU": 0.85, "aspectRatioDelta": 0.05, "scaleDelta": 0.08, "projectionCoverage": 0.85, "finishMaterialResponse": 0.8, "identityDetail": 0.8, "paintedRegion": 0.8, "maxOrbitCollapseRatio": 0.15}
+}

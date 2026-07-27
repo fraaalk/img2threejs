@@ -1,0 +1,11 @@
+{
+  "itemFamily": "pistol",
+  "subtype": "glock-18",
+  "componentAdapter": "cs2-pistol-v1",
+  "componentTree": [
+    {"id": "slide", "transform": {"position": [0, 0.28, 0], "scale": [1, 1, 1]}},
+    {"id": "frame", "transform": {"position": [0, -0.18, 0], "scale": [1, 1, 1]}},
+    {"id": "magazine", "transform": {"position": [0, -0.75, 0], "scale": [1, 1, 1]}},
+    {"id": "barrel", "transform": {"position": [1.12, 0, 0], "scale": [1, 1, 1]}}
+  ]
+}

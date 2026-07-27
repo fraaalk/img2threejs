@@ -93,10 +93,17 @@ class AdapterAndReviewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_family_adapter("rifle", "ak47")
 
+    def test_activated_family_contracts_do_not_use_knife_tree(self) -> None:
+        for family, subtype, forbidden in (("pistol", "glock-18", "blade"), ("rifle", "awp", "blade")):
+            spec = make_spec(f"{family} fixture", None)
+            apply_cs2_template(spec, "anodized-multicolored", item_family=family, subtype=subtype)
+            self.assertEqual(spec["cs2FamilyContract"]["adapterId"], f"cs2-{family}-v1")
+            self.assertNotIn(forbidden, {component["id"] for component in spec["componentTree"]})
+
     def test_review_scene_is_versioned_and_thresholds_are_frozen(self) -> None:
         scene = build_review_scene("fixture-sha256")
-        self.assertEqual(scene["version"], "cs2-knife-review-v1")
-        self.assertEqual(scene["environmentHash"], "fixture-sha256")
+        self.assertEqual(scene["version"], 1)
+        self.assertEqual(scene["environment"]["hash"], "fixture-sha256")
         self.assertEqual(GOLDEN_THRESHOLDS["silhouetteIoU"], 0.85)
         self.assertEqual(validate_review_scene(scene), [])
 

@@ -64,16 +64,31 @@ class Cs2ManifestTests(unittest.TestCase):
             self.assertEqual(accepted["componentAdapter"], "cs2-knife-v1")
             self.assertTrue(validate_manifest(manifest))
 
-    def test_unknown_family_continues_without_knife_adapter(self) -> None:
+    def test_unknown_subtype_is_explicitly_unsupported_without_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             reference = Path(directory) / "rifle.png"
             write_png(reference)
             classification = build_classification_record("rifle", "ak47", 0.99, ["view:front:subject"])
             manifest = build_manifest(reference, classification)
             accepted = apply_confirmation(manifest, "accept", manifest["identityCandidates"][0]["id"])
-            self.assertEqual(accepted["state"], "proceed")
+            self.assertEqual(accepted["state"], "request-input")
+            self.assertEqual(accepted["identityDecision"]["status"], "unsupported-subtype")
             self.assertNotIn("componentAdapter", manifest)
             self.assertNotIn("componentAdapter", accepted)
+
+    def test_glock_and_awp_acceptance_uses_family_qualified_adapters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "weapon.png"
+            write_png(reference)
+            for family, subtype, adapter in (
+                ("pistol", "glock-18", "cs2-pistol-v1"),
+                ("rifle", "awp", "cs2-rifle-v1"),
+            ):
+                manifest = build_manifest(reference, build_classification_record(family, subtype, 0.99, ["view:front:subject"]))
+                accepted = apply_confirmation(manifest, "accept", manifest["identityCandidates"][0]["id"])
+                self.assertEqual(accepted["componentAdapter"], adapter)
+                self.assertEqual(accepted["resolvedIdentity"]["itemFamily"], family)
+                self.assertEqual(accepted["resolvedIdentity"]["subtype"], subtype)
 
     def test_bad_secondary_preserves_primary_continuation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

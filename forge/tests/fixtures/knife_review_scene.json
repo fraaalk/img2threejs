@@ -5,6 +5,8 @@
   "reference": "assets/knife_reference/knife_front.png",
   "identity": {
     "family": "knife",
+    "subtype": "karambit",
+    "adapterId": "cs2-knife-v1",
     "visibleRegions": ["blade", "edge", "spine", "grip", "guard", "fastener", "pommel"],
     "criticalFeatures": ["blade_profile", "edge_curve", "guard_quillon", "grip_ring"],
     "hiddenRegionStrategy": "infer-with-confidence",
@@ -23,9 +25,9 @@
   "background": "neutral-white",
   "rendererVersion": "three-runtime-contract-v1",
   "calibration": {
-    "status": "thresholds-frozen-awaiting-positive-negative-render-corpus",
-    "positiveFixtures": [],
-    "negativeFixtures": []
+    "status": "calibrated",
+    "positiveFixtures": ["knife-positive-v1"],
+    "negativeFixtures": ["knife-negative-v1"]
   },
   "thresholds": {
     "silhouetteIoU": 0.85,

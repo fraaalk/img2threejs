@@ -17,27 +17,13 @@ from forge.stage1_intake.check_reference_admission import check_admission  # noq
 from forge.stage1_intake.cs2_foundation import enrich_manifest_with_metadata, normalize_cs2_metadata  # noqa: E402
 from forge.stage1_intake.detect_cs2 import detect_cs2_signals  # noqa: E402
 from forge.stage1_intake.probe_image import probe  # noqa: E402
+from forge.stage2_spec.cs2_adapters import resolve_family_adapter  # noqa: E402
 
 SCHEMA_VERSION: Final[int] = 2
 ROUTES: Final[frozenset[str]] = frozenset({"reference-projection", "authored-texture", "procedural-finish"})
 TIERS: Final[frozenset[str]] = frozenset({"image-only", "metadata-assisted", "exact-texture"})
 STATES: Final[frozenset[str]] = frozenset({"proceed", "request-input", "rejected"})
 CONFIRMATION_ACTIONS: Final[frozenset[str]] = frozenset({"accept", "none-of-these", "continue-generically", "add-secondary"})
-REGISTERED_ADAPTERS: Final[dict[tuple[str, str | None], str]] = {
-    ("knife", "karambit"): "cs2-knife-v1",
-    ("knife", "butterfly"): "cs2-knife-v1",
-    ("knife", "bayonet"): "cs2-knife-v1",
-    ("knife", "m9"): "cs2-knife-v1",
-    ("knife", "flip"): "cs2-knife-v1",
-    ("knife", "gut"): "cs2-knife-v1",
-    ("knife", "falchion"): "cs2-knife-v1",
-    ("knife", "bowie"): "cs2-knife-v1",
-    ("knife", "navaja"): "cs2-knife-v1",
-    ("knife", "talon"): "cs2-knife-v1",
-    ("knife", "classic"): "cs2-knife-v1",
-}
-
-
 def build_classification_record(
     item_family: str,
     subtype: str | None,
@@ -182,12 +168,22 @@ def apply_confirmation(manifest: dict[str, Any], action: str, candidate_id: str 
         candidate = next((item for item in result["identityCandidates"] if item["id"] == candidate_id), None)
         if candidate is None:
             raise ValueError("candidate ID is not available")
-        result["resolvedIdentity"] = dict(candidate)
+        try:
+            adapter = resolve_family_adapter(candidate["itemFamily"], candidate.get("subtype"))
+        except ValueError as error:
+            reason = str(error).split(":", 1)[0]
+            result["identityDecision"] = {"status": reason, "candidateId": candidate_id, "reason": str(error)}
+            result["state"] = "request-input"
+            result["enrichment"]["retrieval"] = {"status": "not-eligible", "reason": reason}
+            result["genericHandoff"]["resolvedIdentity"] = None
+            result["genericHandoff"]["componentAdapter"] = None
+            return result
+        result["resolvedIdentity"] = {**candidate, "itemFamily": adapter.family, "subtype": adapter.subtype}
+        result["componentAdapter"] = adapter.adapter_id
         result["identityDecision"] = {"status": "accepted", "candidateId": candidate_id}
-        adapter = REGISTERED_ADAPTERS.get((candidate["itemFamily"], candidate.get("subtype")))
-        if adapter:
-            result["componentAdapter"] = adapter
         result["enrichment"]["retrieval"] = {"status": "eligible", "reason": None}
+        result["itemFamily"] = adapter.family
+        result["subtype"] = adapter.subtype
     elif action == "none-of-these":
         result["identityCandidates"] = []
         result["identityDecision"] = {"status": "rejected-all"}

@@ -1,0 +1,11 @@
+{
+  "itemFamily": "rifle",
+  "subtype": "awp",
+  "componentAdapter": "cs2-rifle-v1",
+  "componentTree": [
+    {"id": "receiver", "transform": {"position": [0, 0, 0], "scale": [1, 1, 1]}},
+    {"id": "barrel", "transform": {"position": [2.15, 0, 0], "scale": [1, 1, 1]}},
+    {"id": "scope", "transform": {"position": [0.15, 0.55, 0], "scale": [1, 1, 1]}},
+    {"id": "stock", "transform": {"position": [-1.45, 0, 0], "scale": [1, 1, 1]}}
+  ]
+}

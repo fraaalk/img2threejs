@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "fixtureId": "cs2-rifle-front-v1",
+  "rightsSafeStatus": "user-supplied-review-required",
+  "reference": "assets/rifle_reference/rifle_front.png",
+  "identity": {"family": "rifle", "subtype": "awp", "adapterId": "cs2-rifle-v1"},
+  "camera": {"projection": "orthographic", "azimuthDegrees": 0, "elevationDegrees": 0, "rollDegrees": 0, "target": [0, 0, 0]},
+  "transform": {"position": [0, 0, 0], "rotationDegrees": [0, 0, 0], "scale": [1, 1, 1]},
+  "environment": {"hash": "code-generated-room-v1", "exposure": 0, "toneMapping": "ACESFilmic"},
+  "resolution": {"width": 1024, "height": 1024},
+  "background": "neutral-white",
+  "rendererVersion": "three-runtime-contract-v1",
+  "calibration": {"status": "calibrated", "positiveFixtures": ["rifle-positive-v1"], "negativeFixtures": ["rifle-negative-v1"]},
+  "thresholds": {"silhouetteIoU": 0.85, "aspectRatioDelta": 0.05, "scaleDelta": 0.08, "projectionCoverage": 0.85, "finishMaterialResponse": 0.8, "identityDetail": 0.8, "paintedRegion": 0.8, "maxOrbitCollapseRatio": 0.15}
+}

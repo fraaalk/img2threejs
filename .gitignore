@@ -36,3 +36,6 @@ assets/*
 !assets/logo.svg
 openspec/
 runtime/
+references/
+
+

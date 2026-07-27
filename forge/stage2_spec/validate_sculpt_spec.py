@@ -12,6 +12,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from feature_acceptance_policy import feature_gate_failures, feature_review_policy
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from forge.stage2_spec.cs2_adapters import resolve_family_adapter  # noqa: E402
 
 
 REQUIRED_TOP_LEVEL = {
@@ -434,8 +436,19 @@ def validate_cs2_contract(spec: dict[str, Any], errors: list[str], warnings: lis
         errors.append("cs2Intake.route must be a supported CS2 route")
     if tier not in CS2_EXACTNESS_TIERS:
         errors.append("cs2Intake.exactnessTier must be a supported exactness tier")
-    if intake.get("itemFamily") != "knife":
-        errors.append("cs2Intake requires the registered knife adapter")
+    family = intake.get("itemFamily")
+    subtype = intake.get("subtype")
+    adapter_id = intake.get("componentAdapter")
+    try:
+        adapter = resolve_family_adapter(family, subtype) if isinstance(family, str) else None
+    except ValueError as error:
+        errors.append(str(error))
+        adapter = None
+    if adapter is not None and adapter_id != adapter.adapter_id:
+        errors.append("cs2Intake.componentAdapter does not match the family registry")
+    contract = spec.get("cs2FamilyContract")
+    if adapter is not None and (not isinstance(contract, dict) or contract.get("adapterId") != adapter.adapter_id):
+        errors.append("cs2FamilyContract does not match the family registry")
     if route == "reference-projection":
         camera = spec.get("referenceCamera")
         source = intake.get("deLitAlbedo") or intake.get("sourceImage")

@@ -175,9 +175,11 @@ item: silhouette, proportions, edge profile, hardware layout, coating colour, pa
 wear, roughness response, and camera framing. Every decision must be traceable to evidence or be
 labelled as an approximation.
 
-The initial CS2 family boundary is **knife only**. Pistol, rifle, SMG, sniper, heavy, glove, and
-unknown knife subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not
-receive the knife component tree as a generic fallback.
+The production CS2 family boundary is `knife`, `pistol/glock-18`, and canonical `rifle/awp`.
+SMG, sniper, heavy, and glove remain recognized taxonomy values but are unsupported until their
+own executable contracts and review fixtures exist. Unsupported families and subtypes must stop
+with `unsupported-family` or `unsupported-subtype`; they must not receive the knife component tree
+or a generic object tree as an identity-specific fallback.
 
 ### Layer contract
 
@@ -215,8 +217,10 @@ The canonical hand-off is `cs2-intake.json` (`schemaVersion: 1`). Its state is o
      stated priority.
    Exactness is `image-only`, `metadata-assisted`, or `exact-texture`; changing route must not
    silently upgrade or downgrade the evidence tier.
-6. Select the knife adapter only after family/subtype validation. Record painted regions, unpainted
-   substrate, visible hardware, hidden-region confidence, and every approximation in the spec.
+6. Select the canonical family adapter only after family/subtype validation. Current production
+   adapters are `cs2-knife-v1`, `cs2-pistol-v1`, and `cs2-rifle-v1`; record painted regions,
+   unpainted substrate, visible hardware, hidden-region confidence, and every approximation in the
+   spec.
 7. For projection, solve the camera and de-light the source first. Projected pixels provide colour
    evidence, not automatic geometry truth; geometry still comes from the adapter and silhouette
    review.

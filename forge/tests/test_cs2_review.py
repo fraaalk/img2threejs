@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "stage4_review"))
 
-from cs2_review import evaluate_knife_review, load_review_scene  # noqa: E402
+from cs2_review import evaluate_family_review, evaluate_knife_review, load_review_scene  # noqa: E402
 from append_review import main as append_review_main  # noqa: E402
 
 
@@ -37,7 +37,7 @@ class Cs2ReviewGateTest(unittest.TestCase):
             "identityDetail": 0.9,
             "paintedRegions": [{"id": "blade_finish", "score": 0.9, "confidence": 0.8}],
             "projection": {"coverage": 0.94, "required": True},
-            "multiAngle": {"degenerate": False, "angles": [{"id": "orbit-a"}, {"id": "orbit-b"}]},
+            "multiAngle": {"degenerate": False, "collapseRatio": 0.08, "angles": [{"id": "orbit-a"}, {"id": "orbit-b"}]},
             "criticalFeatures": [{"id": "karambit_ring", "score": 0.9, "threshold": 0.8}],
             "approximationNotes": ["hidden blade side inferred from single view"],
         }
@@ -61,6 +61,43 @@ class Cs2ReviewGateTest(unittest.TestCase):
         self.assertEqual(report["verdict"], "reject")
         self.assertEqual(report["action"], "request-input")
         self.assertIn("unsupported-family:rifle", report["failedGates"])
+
+    def test_supported_family_review_uses_fixture_identity_and_adapter(self) -> None:
+        for family, subtype in (("pistol", "glock-18"), ("rifle", "awp")):
+            manifest = {
+                **self.manifest,
+                "itemFamily": family,
+                "subtype": subtype,
+                "componentAdapter": f"cs2-{family}-v1",
+            }
+            scene = {
+                **self.scene,
+                "fixtureId": f"cs2-{family}-front-v1",
+                "identity": {"family": family, "subtype": subtype, "adapterId": f"cs2-{family}-v1"},
+            }
+            report = evaluate_family_review(manifest, self.passing_inputs(), scene, expected_family=family)
+            self.assertEqual(report["verdict"], "pass")
+            self.assertEqual(report["family"], family)
+            self.assertEqual(report["subtype"], subtype)
+
+    def test_activated_fixture_scenes_are_calibrated_and_family_qualified(self) -> None:
+        for family, subtype in (("knife", "karambit"), ("pistol", "glock-18"), ("rifle", "awp")):
+            scene = load_review_scene(ROOT / "tests" / "fixtures" / f"{family}_review_scene.json")
+            self.assertEqual(scene["identity"]["family"], family)
+            self.assertEqual(scene["identity"]["subtype"], subtype)
+            self.assertEqual(scene["calibration"]["status"], "calibrated")
+            self.assertTrue(scene["calibration"]["positiveFixtures"])
+            self.assertTrue(scene["calibration"]["negativeFixtures"])
+
+    def test_family_review_rejects_adapter_mismatch(self) -> None:
+        scene = {
+            **self.scene,
+            "identity": {"family": "pistol", "subtype": "glock-18", "adapterId": "cs2-rifle-v1"},
+        }
+        manifest = {**self.manifest, "itemFamily": "pistol", "subtype": "glock-18", "componentAdapter": "cs2-pistol-v1"}
+        report = evaluate_family_review(manifest, self.passing_inputs(), scene, expected_family="pistol")
+        self.assertEqual(report["verdict"], "reject")
+        self.assertIn("fixture-adapter-mismatch", report["failedGates"])
 
     def test_projection_coverage_and_identity_detail_are_blocking(self) -> None:
         inputs = self.passing_inputs()
