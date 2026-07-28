@@ -7,6 +7,7 @@ from unittest.mock import patch
 from scripts.issue_triage import (
     MissingQueueLabelError,
     NOTICE_MARKER,
+    TRIAGE_BOT_LOGIN,
     GitHubIssueApi,
     QUEUE_LABEL,
     Issue,
@@ -113,6 +114,17 @@ class IssueTriageTests(unittest.TestCase):
         self.assertEqual(result.noticed, ())
         self.assertEqual(api.operations, [])
 
+    def test_skips_human_labelled_queue_issue_without_notice(self) -> None:
+        # Given: a human has classified an issue after a previous partial bot write.
+        api = FakeIssueApi({10: Issue(10, True, False, (QUEUE_LABEL, "bug"))})
+
+        # When: triage runs again.
+        result = run_triage(api, TriageOptions(dry_run=False))
+
+        # Then: it leaves human-classified issues for maintainer discussion.
+        self.assertEqual(result.skipped, (10,))
+        self.assertEqual(api.operations, [])
+
     def test_dry_run_reports_candidates_without_mutation(self) -> None:
         # Given: an unlabeled open issue.
         api = FakeIssueApi({11: Issue(11, True, False, ())})
@@ -134,6 +146,83 @@ class IssueTriageTests(unittest.TestCase):
         # Then: it leaves the issue unchanged.
         self.assertEqual(result.skipped, (12,))
         self.assertEqual(api.operations, [])
+
+    def test_ignores_notice_marker_from_untrusted_commenter(self) -> None:
+        # Given: a user copies the marker into an issue comment.
+        api = GitHubIssueApi("img2threejs/img2threejs", "token")
+        comments = FakeResponse(
+            '[{"body":"' + NOTICE_MARKER + '","user":{"login":"someone","type":"User"}}]'
+        )
+
+        # When: the helper checks whether it previously wrote the notice.
+        with patch("scripts.issue_triage.urllib.request.urlopen", side_effect=[comments, FakeResponse("[]")]):
+            marked = api.has_notice_marker(12)
+
+        # Then: an untrusted commenter cannot suppress triage.
+        self.assertFalse(marked)
+
+    def test_trusted_bot_marker_prevents_duplicate_notice(self) -> None:
+        # Given: GitHub Actions previously wrote the marker.
+        api = GitHubIssueApi("img2threejs/img2threejs", "token")
+        comments = FakeResponse(
+            '[{"body":"' + NOTICE_MARKER + '","user":{"login":"' + TRIAGE_BOT_LOGIN + '","type":"Bot"}}]'
+        )
+
+        # When: the helper checks the issue comments.
+        with patch("scripts.issue_triage.urllib.request.urlopen", return_value=comments):
+            marked = api.has_notice_marker(12)
+
+        # Then: it recognizes only the bot's own marker.
+        self.assertTrue(marked)
+
+    def test_rechecks_for_notice_before_retrying_ambiguous_comment_write(self) -> None:
+        # Given: a comment POST gets a transient response after GitHub accepted it.
+        transient = urllib.error.HTTPError("https://api.github.test", 503, "unavailable", None, None)
+        api = GitHubIssueApi("img2threejs/img2threejs", "token")
+        comments = FakeResponse(
+            '[{"body":"' + NOTICE_MARKER + '","user":{"login":"' + TRIAGE_BOT_LOGIN + '","type":"Bot"}}]'
+        )
+
+        # When: the helper handles the ambiguous write result.
+        with patch("scripts.issue_triage.urllib.request.urlopen", side_effect=[transient, comments]) as request:
+            api.create_notice(12, NOTICE_MARKER)
+        transient.close()
+
+        # Then: it reads the marker instead of repeating the POST.
+        self.assertEqual(request.call_count, 2)
+        self.assertIn("/issues/12/comments?", request.call_args_list[1].args[0].full_url)
+
+    def test_reads_every_page_of_issue_comments_for_a_trusted_marker(self) -> None:
+        # Given: the trusted notice is beyond the first GitHub comments page.
+        api = GitHubIssueApi("img2threejs/img2threejs", "token")
+        first_page = FakeResponse('[{"body":"discussion","user":{"login":"someone","type":"User"}}]')
+        second_page = FakeResponse(
+            '[{"body":"' + NOTICE_MARKER + '","user":{"login":"' + TRIAGE_BOT_LOGIN + '","type":"Bot"}}]'
+        )
+
+        # When: it searches the issue comments.
+        with patch("scripts.issue_triage.urllib.request.urlopen", side_effect=[first_page, second_page]) as request:
+            marked = api.has_notice_marker(12)
+
+        # Then: the later trusted marker is found.
+        self.assertTrue(marked)
+        self.assertIn("page=2", request.call_args_list[1].args[0].full_url)
+
+    def test_reads_every_page_of_open_issues(self) -> None:
+        # Given: GitHub has more than one page of open records.
+        api = GitHubIssueApi("img2threejs/img2threejs", "token")
+        first_page = FakeResponse('[{"number":18,"state":"open","labels":[],"created_at":"2026-07-28T00:00:00Z"}]')
+        second_page = FakeResponse('[{"number":19,"state":"open","labels":[],"created_at":"2026-07-28T00:00:00Z"}]')
+
+        # When: it lists open issues.
+        with patch(
+            "scripts.issue_triage.urllib.request.urlopen",
+            side_effect=[first_page, second_page, FakeResponse("[]")],
+        ):
+            issues = api.list_open_issues()
+
+        # Then: both pages are included for triage filtering.
+        self.assertEqual(tuple(issue.number for issue in issues), (18, 19))
 
     def test_isolates_marker_lookup_failure(self) -> None:
         # Given: a GitHub request fails for one candidate.

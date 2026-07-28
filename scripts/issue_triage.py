@@ -16,6 +16,7 @@ from typing import Final, Protocol
 API_ROOT: Final = "https://api.github.com"
 NOTICE_MARKER: Final = "<!-- img2threejs-triage-notice:v1 -->"
 QUEUE_LABEL: Final = "triage: needs-review"
+TRIAGE_BOT_LOGIN: Final = "github-actions[bot]"
 NOTICE: Final = (
     f"{NOTICE_MARKER}\n"
     "Thanks for opening this issue. It is in the maintainer triage queue. "
@@ -105,7 +106,12 @@ class GitHubIssueApi:
         page = 1
         while True:
             comments = self._request(f"/repos/{self._repository}/issues/{number}/comments?per_page=100&page={page}")
-            if any(NOTICE_MARKER in comment.get("body", "") for comment in comments):
+            if any(
+                NOTICE_MARKER in comment.get("body", "")
+                and comment.get("user", {}).get("login") == TRIAGE_BOT_LOGIN
+                and comment.get("user", {}).get("type") == "Bot"
+                for comment in comments
+            ):
                 return True
             if not comments:
                 return False
@@ -115,9 +121,22 @@ class GitHubIssueApi:
         self._request(f"/repos/{self._repository}/issues/{number}/labels", {"labels": [label]})
 
     def create_notice(self, number: int, notice: str) -> None:
-        self._request(f"/repos/{self._repository}/issues/{number}/comments", {"body": notice})
+        path = f"/repos/{self._repository}/issues/{number}/comments"
+        try:
+            self._request(path, {"body": notice}, retry=False)
+        except (urllib.error.HTTPError, urllib.error.URLError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code not in TRANSIENT_STATUSES:
+                raise
+            if self.has_notice_marker(number):
+                return
+            self._request(path, {"body": notice}, retry=False)
 
-    def _request(self, path: str, payload: dict[str, list[str]] | dict[str, str] | None = None):
+    def _request(
+        self,
+        path: str,
+        payload: dict[str, list[str]] | dict[str, str] | None = None,
+        retry: bool = True,
+    ):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             f"{API_ROOT}{path}",
@@ -128,15 +147,15 @@ class GitHubIssueApi:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        for attempt in range(3):
+        for attempt in range(3 if retry else 1):
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as error:
-                if error.code not in TRANSIENT_STATUSES or attempt == 2:
+                if error.code not in TRANSIENT_STATUSES or attempt == (2 if retry else 0):
                     raise
             except urllib.error.URLError:
-                if attempt == 2:
+                if attempt == (2 if retry else 0):
                     raise
             time.sleep(2**attempt)
         raise AssertionError("unreachable retry loop")
@@ -173,8 +192,8 @@ def run_triage(api: IssueApi, options: TriageOptions) -> TriageResult:
             if current is None or current.is_pull_request or not current.is_open:
                 skipped.append(listed.number)
                 continue
-            has_queue_label = QUEUE_LABEL in current.labels
-            if not has_queue_label and (current.labels or not is_rollout_candidate(current, options)):
+            is_recovery = current.labels == (QUEUE_LABEL,)
+            if not is_recovery and (current.labels or not is_rollout_candidate(current, options)):
                 skipped.append(current.number)
                 continue
             if api.has_notice_marker(current.number):
@@ -183,7 +202,7 @@ def run_triage(api: IssueApi, options: TriageOptions) -> TriageResult:
             if options.dry_run:
                 would_notice.append(current.number)
                 continue
-            if has_queue_label:
+            if is_recovery:
                 api.create_notice(current.number, NOTICE)
                 reconciled.append(current.number)
             else:

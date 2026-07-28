@@ -1,9 +1,10 @@
 # Issue triage
 
-The triage workflow runs on odd-numbered UTC calendar dates at 09:17. It is best effort, not an
-exact 48-hour service level. A maintainer can use **Run workflow** in dry-run mode to see every
-unlabeled candidate, then use backfill only after reviewing that result. Scheduled runs consider
-only issues created after `TRIAGE_ROLLOUT_AFTER` in `.github/workflows/issue-triage.yml`.
+The triage workflow starts daily at 09:17 UTC and runs its helper on every second UTC epoch day, so
+the cadence stays continuous across month boundaries. It is best effort, not an exact 48-hour
+service level. A maintainer can use **Run workflow** in dry-run mode to see every zero-label
+candidate, then use backfill only after reviewing that result. Scheduled runs consider only issues
+created after `TRIAGE_ROLLOUT_AFTER` in `.github/workflows/issue-triage.yml`.
 
 ## Labels
 
@@ -15,6 +16,10 @@ only issues created after `TRIAGE_ROLLOUT_AFTER` in `.github/workflows/issue-tri
 
 Existing labels such as `bug`, `enhancement`, and `documentation` remain independent. The bot never
 removes labels, closes issues, locks them, assigns people, or applies terminal labels.
+
+The scheduled candidate set is open non-PR issues with zero labels. The only exception is recovery
+of an issue carrying exactly `triage: needs-review` when a prior bot run added that label but failed
+before it could create the notice. A bot notice marker is accepted only from `github-actions[bot]`.
 
 ## Maintainer decision record
 
