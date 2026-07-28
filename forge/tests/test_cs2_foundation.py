@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -128,6 +129,19 @@ class AdapterAndReviewTests(unittest.TestCase):
         apply_cs2_manifest_evidence(spec, manifest)
         self.assertEqual(spec["cs2Intake"]["exactnessTier"], "metadata-assisted")
         self.assertEqual(spec["materials"][0]["route"], "procedural-finish")
+
+    def test_glove_multiview_handoff_preserves_the_validated_record(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "glove_multiview_valid.json"
+        manifest = json.loads(fixture.read_text(encoding="utf-8"))
+        manifest["resolvedIdentity"] = {"itemFamily": "glove", "subtype": "sport-gloves"}
+
+        spec = make_spec("Sport Gloves | Hedge Maze", None)
+        apply_cs2_template(spec, item_family="glove", subtype="sport-gloves")
+        apply_cs2_manifest_evidence(spec, manifest)
+
+        self.assertEqual(spec["cs2FamilyContract"]["adapterId"], "cs2-glove-v1")
+        self.assertEqual(spec["gloveMultiView"], manifest["gloveMultiView"])
+        self.assertEqual(spec["cs2Intake"]["gloveMultiView"], manifest["gloveMultiView"])
 
     def test_validator_rejects_invalid_exactness_route_pair(self) -> None:
         errors: list[str] = []

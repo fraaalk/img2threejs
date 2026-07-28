@@ -72,10 +72,24 @@ _RIFLE = FamilyAdapter(
 )
 SUPPORTED_RIFLE_SUBTYPES = frozenset({"awp"})
 
+_GLOVE = FamilyAdapter(
+    "glove", "generic-supported", "cs2-glove-v1", "1", "production-eligible",
+    ("continuous-sculpt", "capsule-cluster", "conforming-shell", "assembled-solid"),
+    ("dorsal-armor", "palm-padding", "green-textile", "black-grip", "wrist-frame", "wear-zones"),
+    ("textile", "synthetic-leather", "rubber", "stitched-seam", "wear-mask"),
+    ("paired-glove-silhouette", "five-finger-stalls", "thumb-gusset", "dorsal-knuckle-guards",
+     "palm-pad-layout", "wrist-frame-and-cuff", "seam-routing", "field-tested-wear"),
+    ("finger-stalls-to-palm", "thumb-to-palm", "guards-to-dorsal-shell", "cuff-to-wrist-shell",
+     "wrist-frame-to-cuff"),
+    ("dorsal-reference", "palm-reference", "orbit-left", "orbit-right", "wrist-on"),
+)
+SUPPORTED_GLOVE_SUBTYPES = frozenset({"sport-gloves"})
+
 _ADAPTERS = {
     "knife": (_KNIFE, SUPPORTED_KNIFE_SUBTYPES),
     "pistol": (_PISTOL, SUPPORTED_PISTOL_SUBTYPES),
     "rifle": (_RIFLE, SUPPORTED_RIFLE_SUBTYPES),
+    "glove": (_GLOVE, SUPPORTED_GLOVE_SUBTYPES),
 }
 RECOGNIZED_FAMILIES = frozenset({"knife", "pistol", "rifle", "smg", "sniper", "heavy", "glove"})
 FAMILY_ALIASES = {"sniper": "rifle"}

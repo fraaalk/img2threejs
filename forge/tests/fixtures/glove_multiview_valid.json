@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 3,
+  "state": "proceed",
+  "itemFamily": "glove",
+  "subtype": "sport-gloves",
+  "componentAdapter": "cs2-glove-v1",
+  "route": "reference-projection",
+  "exactnessTier": "image-only",
+  "primaryImage": {"role": "primary", "path": "glove-dorsal.png"},
+  "genericHandoff": {},
+  "gloveMultiView": {
+    "version": "glove-multiview-v1",
+    "topologyKind": "full-finger",
+    "canonicalHand": "left",
+    "canonicalFrame": {"origin": "wrist-centre", "x": "thumb-side", "y": "wrist-to-tips", "z": "dorsal"},
+    "views": [
+      {"viewId": "left-dorsal", "physicalObjectId": "left-01", "pairId": "pair-01", "hand": "left", "role": "dorsal", "poseId": "open-flat-01", "image": {"path": "glove-dorsal.png", "contentHash": "dorsal-hash", "width": 1000, "height": 1000}, "crop": {"space": "normalized-image-v1", "x": 0.05, "y": 0.05, "width": 0.4, "height": 0.9}, "cameraToLocal": {"position": [0, 0, 1], "forward": [0, 0, -1], "up": [0, 1, 0]}, "digits": {"thumb": "observed", "index": "observed", "middle": "observed", "ring": "observed", "little": "observed"}, "cuff": "observed", "landmarks": {"thumb": {"x": 0.1, "y": 0.4, "width": 0.05, "height": 0.1}, "index": {"x": 0.18, "y": 0.1, "width": 0.04, "height": 0.2}, "middle": {"x": 0.24, "y": 0.08, "width": 0.04, "height": 0.22}, "ring": {"x": 0.3, "y": 0.11, "width": 0.04, "height": 0.2}, "little": {"x": 0.36, "y": 0.17, "width": 0.035, "height": 0.16}, "cuff": {"x": 0.12, "y": 0.78, "width": 0.24, "height": 0.08}}},
+      {"viewId": "left-palmar", "physicalObjectId": "left-01", "pairId": "pair-01", "hand": "left", "role": "palmar", "poseId": "open-flat-01", "image": {"path": "glove-palmar.png", "contentHash": "palmar-hash", "width": 1000, "height": 1000}, "crop": {"space": "normalized-image-v1", "x": 0.05, "y": 0.05, "width": 0.4, "height": 0.9}, "cameraToLocal": {"position": [0, 0, -1], "forward": [0, 0, 1], "up": [0, 1, 0]}, "digits": {"thumb": "observed", "index": "observed", "middle": "observed", "ring": "observed", "little": "observed"}, "cuff": "observed", "landmarks": {"thumb": {"x": 0.1, "y": 0.4, "width": 0.05, "height": 0.1}, "index": {"x": 0.18, "y": 0.1, "width": 0.04, "height": 0.2}, "middle": {"x": 0.24, "y": 0.08, "width": 0.04, "height": 0.22}, "ring": {"x": 0.3, "y": 0.11, "width": 0.04, "height": 0.2}, "little": {"x": 0.36, "y": 0.17, "width": 0.035, "height": 0.16}, "cuff": {"x": 0.12, "y": 0.78, "width": 0.24, "height": 0.08}}},
+      {"viewId": "right-dorsal", "physicalObjectId": "right-01", "pairId": "pair-01", "hand": "right", "role": "dorsal", "poseId": "open-flat-01", "image": {"path": "glove-dorsal.png", "contentHash": "dorsal-hash", "width": 1000, "height": 1000}, "crop": {"space": "normalized-image-v1", "x": 0.55, "y": 0.05, "width": 0.4, "height": 0.9}, "cameraToLocal": {"position": [0, 0, 1], "forward": [0, 0, -1], "up": [0, 1, 0]}, "digits": {"thumb": "observed", "index": "observed", "middle": "observed", "ring": "observed", "little": "observed"}, "cuff": "observed", "landmarks": {"thumb": {"x": 0.6, "y": 0.4, "width": 0.05, "height": 0.1}, "index": {"x": 0.68, "y": 0.1, "width": 0.04, "height": 0.2}, "middle": {"x": 0.74, "y": 0.08, "width": 0.04, "height": 0.22}, "ring": {"x": 0.8, "y": 0.11, "width": 0.04, "height": 0.2}, "little": {"x": 0.86, "y": 0.17, "width": 0.035, "height": 0.16}, "cuff": {"x": 0.62, "y": 0.78, "width": 0.24, "height": 0.08}}},
+      {"viewId": "right-palmar", "physicalObjectId": "right-01", "pairId": "pair-01", "hand": "right", "role": "palmar", "poseId": "open-flat-01", "image": {"path": "glove-palmar.png", "contentHash": "palmar-hash", "width": 1000, "height": 1000}, "crop": {"space": "normalized-image-v1", "x": 0.55, "y": 0.05, "width": 0.4, "height": 0.9}, "cameraToLocal": {"position": [0, 0, -1], "forward": [0, 0, 1], "up": [0, 1, 0]}, "digits": {"thumb": "observed", "index": "observed", "middle": "observed", "ring": "observed", "little": "observed"}, "cuff": "observed", "landmarks": {"thumb": {"x": 0.6, "y": 0.4, "width": 0.05, "height": 0.1}, "index": {"x": 0.68, "y": 0.1, "width": 0.04, "height": 0.2}, "middle": {"x": 0.74, "y": 0.08, "width": 0.04, "height": 0.22}, "ring": {"x": 0.8, "y": 0.11, "width": 0.04, "height": 0.2}, "little": {"x": 0.86, "y": 0.17, "width": 0.035, "height": 0.16}, "cuff": {"x": 0.62, "y": 0.78, "width": 0.24, "height": 0.08}}}
+    ],
+    "regions": [
+      {"regionId": "dorsal-shell", "evidenceState": "observed", "sourceViewIds": ["left-dorsal", "right-dorsal"], "confidence": 0.95, "reason": "dorsal views"},
+      {"regionId": "palmar-panel", "evidenceState": "observed", "sourceViewIds": ["left-palmar", "right-palmar"], "confidence": 0.95, "reason": "palmar views"},
+      {"regionId": "sidewalls", "evidenceState": "inferred", "sourceViewIds": [], "confidence": 0.4, "reason": "hidden profile", "inferenceMethod": "symmetric-shell"}
+    ],
+    "textureAssignments": [
+      {"regionId": "dorsal-shell", "materialSlot": "dorsal", "uvIsland": "dorsal-shell", "sourceViewId": "left-dorsal", "projectionMask": "dorsal-mask", "overlapPriority": 2, "channels": {"baseColor": "sRGB"}},
+      {"regionId": "palmar-panel", "materialSlot": "palmar", "uvIsland": "palmar-panel", "sourceViewId": "left-palmar", "projectionMask": "palmar-mask", "overlapPriority": 2, "channels": {"baseColor": "sRGB"}}
+    ]
+  }
+}

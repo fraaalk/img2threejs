@@ -1,0 +1,9 @@
+{
+  "version": "glove-review-scene-v1",
+  "fixtureId": "cs2-sport-gloves-hedge-maze-v1",
+  "resolution": {"width": 1600, "height": 1000},
+  "captureMasks": {"left-dorsal": "mask-left-dorsal", "left-palmar": "mask-left-palmar", "right-dorsal": "mask-right-dorsal", "right-palmar": "mask-right-palmar"},
+  "sourceHashes": {"dorsal": "dorsal-hash", "palmar": "palmar-hash"},
+  "environment": {"hash": "emerald-inspection-bay-v1"},
+  "rendererVersion": "three-r180"
+}

@@ -7,6 +7,7 @@ import {
   type GeneratedFamilySpec,
   type GeneratedKnifeSpec,
 } from './generatedKnifeFactory';
+import { createGeneratedGloveEnvironment, createGeneratedGlovePair, type GeneratedGloveSpec } from './generatedGloveFactory';
 
 type ProjectionStatus = 'ready' | 'request-input' | 'fallback';
 type Vector3Tuple = readonly [number, number, number];
@@ -27,6 +28,7 @@ type IntakeManifest = Readonly<{
   route: string;
   exactnessTier: string;
   componentAdapter: string;
+  resolvedIdentity?: Readonly<{ name?: string }>;
   sourceViews: readonly SourceView[];
   camera?: Readonly<{
     projectionMode?: 'perspective-camera-projection' | 'orthographic-front-projection';
@@ -35,10 +37,11 @@ type IntakeManifest = Readonly<{
     target?: Vector3Tuple;
   }>;
   environment?: Readonly<{ available: boolean; hash: string }>;
+  gloveMultiView?: Readonly<{ version: string; topologyKind: string; views: readonly JsonRecord[] }>;
 }>;
 
 type PreviewSpec = Readonly<{
-  kind: 'knife' | 'pistol' | 'rifle';
+  kind: 'knife' | 'pistol' | 'rifle' | 'glove';
   itemFamily: string;
   subtype: string;
   adapterId: string;
@@ -92,6 +95,13 @@ function stringField(record: JsonRecord, key: string): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function stringArrayField(record: JsonRecord, key: string): readonly string[] | undefined {
+  const value = record[key];
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return strings.length === value.length ? strings : undefined;
+}
+
 function tupleField(record: JsonRecord, key: string): Vector3Tuple | undefined {
   const value = record[key];
   if (!Array.isArray(value) || value.length !== 3 || !value.every((item) => typeof item === 'number')) return undefined;
@@ -99,6 +109,21 @@ function tupleField(record: JsonRecord, key: string): Vector3Tuple | undefined {
   const second = value[1];
   const third = value[2];
   return typeof first === 'number' && typeof second === 'number' && typeof third === 'number' ? [first, second, third] : undefined;
+}
+
+function validGloveView(value: JsonRecord): boolean {
+  const image = value.image;
+  const crop = value.crop;
+  const camera = value.cameraToLocal;
+  const digits = value.digits;
+  const landmarks = value.landmarks;
+  const textFields = ['viewId', 'physicalObjectId', 'pairId', 'hand', 'role', 'poseId'];
+  if (!textFields.every((field) => stringField(value, field) !== undefined) || !isRecord(image) || !isRecord(crop) || !isRecord(camera) || !isRecord(digits) || !isRecord(landmarks)) return false;
+  if (value.hand !== 'left' && value.hand !== 'right' || value.role !== 'dorsal' && value.role !== 'palmar' || value.cuff !== 'observed') return false;
+  if (!['path', 'contentHash'].every((field) => stringField(image, field) !== undefined) || !['width', 'height'].every((field) => typeof image[field] === 'number' && image[field] > 0)) return false;
+  if (!['x', 'y', 'width', 'height'].every((field) => typeof crop[field] === 'number' && crop[field] >= 0 && crop[field] <= 1) || Number(crop.x) + Number(crop.width) > 1 || Number(crop.y) + Number(crop.height) > 1) return false;
+  if (!['position', 'forward', 'up'].every((field) => tupleField(camera, field) !== undefined)) return false;
+  return ['thumb', 'index', 'middle', 'ring', 'little'].every((digit) => digits[digit] === 'observed' && isRecord(landmarks[digit]));
 }
 
 function parseManifest(value: unknown): IntakeManifest {
@@ -141,17 +166,26 @@ function parseManifest(value: unknown): IntakeManifest {
   const itemFamily = stringField(value, 'itemFamily') ?? (isRecord(value.resolvedIdentity) ? stringField(value.resolvedIdentity, 'itemFamily') : undefined) ?? 'unknown';
   const componentAdapter = stringField(value, 'componentAdapter') ?? (itemFamily === 'knife' ? 'cs2-knife-v1' : undefined);
   if (!componentAdapter) throw new PreviewInputError('invalid-manifest', `manifest has no adapter for ${itemFamily}`);
+  const gloveValue = value.gloveMultiView;
+  const gloveMultiView = isRecord(gloveValue) && Array.isArray(gloveValue.views)
+    ? { version: stringField(gloveValue, 'version') ?? '', topologyKind: stringField(gloveValue, 'topologyKind') ?? '', views: gloveValue.views.filter(isRecord) }
+    : undefined;
+  if (itemFamily === 'glove' && (value.schemaVersion !== 3 || gloveMultiView?.version !== 'glove-multiview-v1' || gloveMultiView.topologyKind !== 'full-finger' || gloveMultiView.views.length !== 4 || !gloveMultiView.views.every(validGloveView))) {
+    throw new PreviewInputError('missing-projection-input', 'full-finger glove preview requires schema-v3 dorsal/palmar crop registration');
+  }
   return {
     schemaVersion: typeof value.schemaVersion === 'number' ? value.schemaVersion : 0,
     state: stringField(value, 'state') ?? 'request-input',
     itemFamily,
     subtype: stringField(value, 'subtype') ?? (isRecord(value.resolvedIdentity) ? stringField(value.resolvedIdentity, 'subtype') : undefined) ?? 'unknown',
     componentAdapter,
+    ...(isRecord(value.resolvedIdentity) ? { resolvedIdentity: { ...(stringField(value.resolvedIdentity, 'name') ? { name: stringField(value.resolvedIdentity, 'name') } : {}) } } : {}),
     route: stringField(value, 'route') ?? 'unknown',
     exactnessTier: stringField(value, 'exactnessTier') ?? 'unknown',
     sourceViews,
     ...(camera ? { camera } : {}),
     environment,
+    ...(gloveMultiView ? { gloveMultiView } : {}),
   };
 }
 
@@ -163,7 +197,8 @@ function parseSpec(value: unknown): PreviewSpec {
   const subtype = stringField(value, 'subtype') ?? (intake ? stringField(intake, 'subtype') : undefined);
   const adapterId = stringField(value, 'componentAdapter') ?? (intake ? stringField(intake, 'componentAdapter') : undefined) ?? (family === 'knife' ? 'cs2-knife-v1' : undefined);
   if (!family || !subtype || !adapterId) throw new PreviewInputError('invalid-spec', 'family spec is missing identity metadata');
-  const common = { materialChannels: ['albedo', 'roughness', 'metalness', 'normal', 'ao'], environmentAvailable: value.environmentAvailable !== false, genericComponents: components, itemFamily: family, subtype, adapterId } as const;
+  const materialChannels = stringArrayField(value, 'materialChannels') ?? ['albedo', 'roughness', 'metalness', 'normal', 'ao'];
+  const common = { materialChannels, environmentAvailable: value.environmentAvailable !== false, genericComponents: components, itemFamily: family, subtype, adapterId } as const;
   switch (family) {
     case 'knife':
       if (adapterId !== 'cs2-knife-v1') throw new PreviewInputError('invalid-spec', 'knife adapter mismatch');
@@ -174,6 +209,9 @@ function parseSpec(value: unknown): PreviewSpec {
     case 'rifle':
       if (adapterId !== 'cs2-rifle-v1') throw new PreviewInputError('invalid-spec', 'rifle adapter mismatch');
       return { ...common, kind: 'rifle' };
+    case 'glove':
+      if (adapterId !== 'cs2-glove-v1') throw new PreviewInputError('invalid-spec', 'glove adapter mismatch');
+      return { ...common, kind: 'glove' };
     default:
       throw new PreviewInputError('invalid-spec', `unsupported CS2 family: ${family}`);
   }
@@ -289,6 +327,7 @@ async function start(): Promise<void> {
   const artifactLink = requiredElement<HTMLAnchorElement>('#download-artifact');
   currentPhase = 'renderer';
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1;
@@ -296,18 +335,30 @@ async function start(): Promise<void> {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#121316');
   currentPhase = 'manifest';
-  const manifest = parseManifest(await loadJson('/cs2-intake.json'));
+  const manifest = parseManifest(await loadJson('/cs2-glove-intake.json'));
   currentPhase = 'spec';
-  const specPath = manifest.itemFamily === 'knife' ? '/cs2-knife.spec.json' : `/cs2-${manifest.itemFamily}.spec.json`;
+  const specPath = `/cs2-${manifest.itemFamily}.spec.json`;
   const spec = parseSpec(await loadJson(specPath));
   if (spec.itemFamily !== manifest.itemFamily || spec.subtype !== manifest.subtype || spec.adapterId !== manifest.componentAdapter) {
     throw new PreviewInputError('invalid-spec', 'manifest and spec family identity do not match');
   }
   const camera = makeProjectorCamera(manifest);
-  const sourceView = manifest.sourceViews.find((view) => view.role === 'primary') ?? manifest.sourceViews[0];
+  const sourceView = manifest.sourceViews.find((view) => spec.kind === 'glove' ? view.role === 'primary' : view.role === 'primary') ?? manifest.sourceViews[0];
   if (!sourceView) throw new PreviewInputError('missing-projection-input', 'manifest source view disappeared after parsing');
   currentPhase = 'source-image';
   const source = await new THREE.TextureLoader().loadAsync(sourceView.path);
+  if (spec.kind === 'glove' && manifest.gloveMultiView) {
+    const uniqueSources = new Map<string, JsonRecord>();
+    for (const view of manifest.gloveMultiView.views) {
+      const image = view.image;
+      if (!isRecord(image)) throw new PreviewInputError('missing-projection-input', 'glove view is missing image metadata');
+      const key = `${stringField(image, 'contentHash') ?? ''}|srgb|linear`;
+      if (!uniqueSources.has(key)) uniqueSources.set(key, image);
+    }
+    const sourceBytes = [...uniqueSources.values()].reduce((total, image) => total + Number(image.width) * Number(image.height) * 4, 0);
+    if (sourceBytes > 16 * 1024 * 1024) throw new PreviewInputError('missing-projection-input', 'glove source textures exceed the 16 MiB paired-preview budget');
+    await Promise.all([...uniqueSources.values()].map((image) => new THREE.TextureLoader().loadAsync(stringField(image, 'path') ?? '')));
+  }
   source.colorSpace = THREE.SRGBColorSpace;
   source.anisotropy = renderer.capabilities.getMaxAnisotropy();
   let model: THREE.Group;
@@ -319,43 +370,62 @@ async function start(): Promise<void> {
     case 'rifle':
       model = createGeneratedFamily({ family: spec.kind, materialChannels: spec.materialChannels } satisfies GeneratedFamilySpec);
       break;
+    case 'glove':
+      model = createGeneratedGlovePair({ materialChannels: spec.materialChannels, environmentAvailable: spec.environmentAvailable } satisfies GeneratedGloveSpec);
+      break;
     default:
       throw new PreviewInputError('invalid-spec', 'unsupported preview factory');
   }
   scene.add(model);
-  scene.add(createGeneratedKnifeEnvironment());
-  const projectorMaterial = projectiveTextureMaterial(source, camera);
-  replaceProjectionMaterial(model, projectorMaterial);
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(2.8, 64), new THREE.MeshStandardMaterial({ color: '#1b1d23', roughness: 0.86 }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = -0.55; floor.receiveShadow = true; scene.add(floor);
+  scene.add(spec.kind === 'glove' ? createGeneratedGloveEnvironment() : createGeneratedKnifeEnvironment());
+  if (spec.kind !== 'glove') {
+    const projectorMaterial = projectiveTextureMaterial(source, camera);
+    replaceProjectionMaterial(model, projectorMaterial);
+  }
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(2.8, 64), new THREE.MeshStandardMaterial({ color: '#1b2d20', roughness: 0.86 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -1.42; floor.receiveShadow = true; scene.add(floor);
   currentPhase = 'uv-bake';
-  const bake = bakeUv(model, source, camera, renderer, 256);
+  const bakeCoverage = spec.kind === 'glove' ? 0 : bakeUv(model, source, camera, renderer, 256).coverage;
   const captures: Record<string, string> = {};
-  const render = (yaw: number, pitch: number, label: string): void => { model.rotation.set(pitch, yaw, -0.12); renderer.render(scene, camera); captures[label] = capture(renderer, label); };
-  const resize = (): void => { const height = Math.max(420, window.innerHeight - 160); renderer.setSize(window.innerWidth, height, false); camera.aspect = window.innerWidth / height; camera.updateProjectionMatrix(); render(0, 0, 'fixed-view'); };
+  let currentYaw = 0;
+  let currentPitch = 0;
+  const render = (): void => { model.rotation.set(currentPitch, currentYaw, -0.12); renderer.render(scene, camera); };
+  const captureView = (yaw: number, pitch: number, label: string): void => {
+    currentYaw = yaw;
+    currentPitch = pitch;
+    render();
+    captures[label] = capture(renderer, label);
+    for (const button of document.querySelectorAll<HTMLButtonElement>('.actions button')) button.setAttribute('aria-pressed', String(button.id === label));
+  };
+  const resize = (): void => {
+    const height = Math.max(420, window.innerHeight - 160);
+    const aspect = window.innerWidth / height;
+    renderer.setSize(window.innerWidth, height, false);
+    camera.aspect = aspect;
+    if (spec.kind === 'glove') camera.position.z = aspect < 1 ? 5.2 / aspect : 5.2;
+    camera.updateProjectionMatrix();
+    render();
+  };
   window.addEventListener('resize', resize);
-  document.querySelector('#fixed-view')?.addEventListener('click', () => render(0, 0, 'fixed-view'));
-  document.querySelector('#orbit-a')?.addEventListener('click', () => render(0.55, 0.18, 'orbit-a'));
-  document.querySelector('#orbit-b')?.addEventListener('click', () => render(-0.7, -0.12, 'orbit-b'));
+  document.querySelector('#fixed-view')?.addEventListener('click', () => captureView(0, 0, 'fixed-view'));
+  document.querySelector('#orbit-a')?.addEventListener('click', () => captureView(0.55, 0.18, 'orbit-a'));
+  document.querySelector('#orbit-b')?.addEventListener('click', () => captureView(-0.7, -0.12, 'orbit-b'));
   resize();
-  render(0.55, 0.18, 'orbit-a');
-  render(-0.7, -0.12, 'orbit-b');
-  render(0, 0, 'fixed-view');
   const artifact: ReviewArtifact = {
     family: manifest.itemFamily,
     subtype: manifest.subtype,
     adapterId: manifest.componentAdapter,
     contractVersion: '1',
     fixtureId: `cs2-${manifest.itemFamily}-front-v1`,
-    projectionStatus: manifest.state === 'proceed' && manifest.route === 'reference-projection' ? 'ready' : 'request-input',
-    projectionCoverage: bake.coverage,
+    projectionStatus: spec.kind === 'glove' ? 'fallback' : manifest.state === 'proceed' && manifest.route === 'reference-projection' ? 'ready' : 'request-input',
+    projectionCoverage: bakeCoverage,
     bakedTexture: 'runtime://uv-render-target/albedo',
     coverageMask: 'runtime://uv-render-target/coverage',
     manifestReviewArtifact: {
-      projectionCoverage: bake.coverage,
+      projectionCoverage: bakeCoverage,
       bakedTexture: 'runtime://uv-render-target/albedo',
       coverageMask: 'runtime://uv-render-target/coverage',
-      status: manifest.state === 'proceed' && manifest.route === 'reference-projection' ? 'ready' : 'request-input',
+      status: spec.kind === 'glove' ? 'fallback' : manifest.state === 'proceed' && manifest.route === 'reference-projection' ? 'ready' : 'request-input',
     },
     captures,
     materialChannels: spec.materialChannels,
@@ -366,10 +436,10 @@ async function start(): Promise<void> {
   artifactLink.href = URL.createObjectURL(new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' }));
   artifactLink.download = 'cs2-review-artifact.json';
   artifactLink.removeAttribute('aria-disabled');
-  status.textContent = `${manifest.itemFamily} / ${manifest.subtype} · ${manifest.route}`;
+  status.textContent = `${manifest.resolvedIdentity?.name ?? `${manifest.itemFamily} / ${manifest.subtype}`} · ${spec.kind === 'glove' ? 'non-production anatomical preview' : manifest.route}`;
   state.textContent = `state: ${manifest.state}`;
   tier.textContent = `tier: ${manifest.exactnessTier}`;
-  coverageLabel.textContent = `projection coverage: ${bake.coverage.toFixed(3)}`;
+  coverageLabel.textContent = `projection coverage: ${bakeCoverage.toFixed(3)}`;
 }
 
 start().catch((error: unknown) => {

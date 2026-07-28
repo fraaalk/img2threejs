@@ -743,13 +743,18 @@ def make_cs2_component_tree(item_family: str = "knife", subtype: str | None = No
         return [root, *parts]
     if adapter.family == "pistol":
         return [root, _cs2node("slide", "Slide", "extrude", (0, 0.35, 0), (0.9, 0.3, 0.22), "skin-finish", "slide", "macro", 1.0), _cs2node("frame", "Frame", "box", (0, -0.15, 0), (0.72, 0.38, 0.3), "skin-finish", "frame", "macro", 1.0), _cs2node("trigger-guard", "Trigger guard", "torus", (0, -0.28, 0.08), (0.2, 0.18, 0.12), "substrate", "trigger-guard", "meso", 0.9), _cs2node("barrel", "Barrel", "cylinder", (0.82, 0.35, 0), (0.18, 0.18, 0.48), "substrate", "barrel", "meso", 0.8), _cs2node("magazine", "Magazine", "box", (0, -0.62, 0), (0.28, 0.16, 0.45), "skin-finish", "magazine", "meso", 0.8), _cs2node("sights", "Sights", "box", (0.15, 0.65, 0), (0.24, 0.08, 0.08), "substrate", "sights", "micro", 0.7)]
+    if adapter.family == "glove":
+        return [root, _cs2node("dorsal-shell", "Dorsal shell", "ellipsoid", (0, 0, 0), (0.86, 1.28, 0.3), "skin-finish", "dorsal", "macro", 1.0), _cs2node("palm-shell", "Palm shell", "ellipsoid", (0, 0, -0.02), (0.86, 1.28, 0.3), "skin-finish", "palm", "macro", 1.0), _cs2node("finger-stalls", "Five finger stalls", "instanced-cluster", (0, 0.8, 0), (0.82, 1.1, 0.24), "skin-finish", "fingers", "macro", 1.0), _cs2node("thumb-gusset", "Thumb gusset", "capsule", (0.52, 0.02, 0), (0.26, 0.54, 0.24), "skin-finish", "thumb", "meso", 0.9), _cs2node("knuckle-guards", "Dorsal knuckle guards", "extrude", (0, 0.44, 0.18), (0.7, 0.32, 0.1), "substrate", "guards", "meso", 0.9), _cs2node("palm-pads", "Palm padding", "extrude", (0, -0.08, -0.18), (0.66, 0.72, 0.08), "substrate", "pads", "meso", 0.9), _cs2node("wrist-cuff", "Wrist cuff", "box", (0, -0.82, 0), (0.92, 0.28, 0.28), "substrate", "cuff", "meso", 0.8), _cs2node("wrist-frame", "Green wrist frame", "extrude", (0, -0.82, 0.17), (0.76, 0.25, 0.08), "skin-finish", "frame", "micro", 0.8), _cs2node("seam-routing", "Stitched seam routing", "tube", (0, 0.0, 0.2), (0.78, 1.12, 0.03), "substrate", "seams", "micro", 0.7)]
     return [root, _cs2node("receiver", "Receiver", "box", (0, 0.0, 0), (1.0, 0.35, 0.35), "skin-finish", "receiver", "macro", 1.0), _cs2node("barrel", "Barrel", "cylinder", (1.35, 0.0, 0), (1.35, 0.12, 0.12), "substrate", "barrel", "macro", 1.0), _cs2node("scope", "Scope", "cylinder", (0.0, 0.4, 0), (0.5, 0.14, 0.14), "substrate", "scope", "meso", 0.9), _cs2node("stock", "Stock", "box", (-1.15, 0.0, 0), (0.65, 0.3, 0.3), "skin-finish", "stock", "macro", 0.9), _cs2node("magazine", "Magazine", "box", (0.0, -0.45, 0), (0.25, 0.15, 0.45), "substrate", "magazine", "meso", 0.8), _cs2node("bipod", "Bipod", "cylinder", (0.65, -0.35, 0), (0.12, 0.12, 0.38), "substrate", "bipod", "meso", 0.7), _cs2node("bolt", "Bolt", "cylinder", (-0.25, 0.35, 0), (0.1, 0.1, 0.3), "substrate", "bolt", "micro", 0.7)]
 
 
 def make_cs2_feature_targets(item_family: str = "knife") -> list:
     if item_family != "knife":
         adapter = get_family_adapter(item_family)
-        component_refs = {"pistol": ["slide", "frame", "barrel", "trigger-guard", "magazine"], "rifle": ["receiver", "barrel", "scope", "stock", "magazine", "bipod"]}[item_family]
+        component_refs = {"pistol": ["slide", "frame", "barrel", "trigger-guard", "magazine"], "rifle": ["receiver", "barrel", "scope", "stock", "magazine", "bipod"], "glove": ["dorsal-shell", "palm-shell", "finger-stalls", "thumb-gusset", "knuckle-guards", "palm-pads", "wrist-cuff", "wrist-frame", "seam-routing"]}[item_family]
+        if item_family == "glove":
+            pass_ids = ["blockout", "blockout", "blockout", "blockout", "blockout", "surface-pass", "surface-pass", "material-pass"]
+            return [{"id": f"cs2-glove-{index}", "name": feature, "tier": "critical" if index < 5 else "important", "passIds": [pass_ids[index]], "minimumScore": 0.75 if index < 5 else 0.65, "mustPass": index < 5, "componentRefs": component_refs, "evidenceRefs": ["full-object"], "contractFeature": feature} for index, feature in enumerate(adapter.feature_targets)]
         return [{"id": f"cs2-{item_family}-{index}", "name": feature, "tier": "critical", "passIds": ["blockout"], "minimumScore": 0.75, "mustPass": True, "componentRefs": component_refs, "evidenceRefs": ["full-object"], "contractFeature": feature} for index, feature in enumerate(adapter.feature_targets)]
     return [
         {"id": "cs2-silhouette", "name": "Weapon silhouette and proportions", "tier": "critical",
@@ -850,6 +855,8 @@ def apply_cs2_manifest_evidence(spec: dict, manifest: dict) -> dict:
         "componentAdapter": manifest.get("componentAdapter"),
         "route": manifest.get("route"),
         "exactnessTier": manifest.get("exactnessTier"),
+        "deLitAlbedo": manifest.get("deLitAlbedo"),
+        "sourceImage": manifest.get("sourceImage") or manifest.get("deLitAlbedo"),
         "identity": manifest.get("identity", {}),
         "finish": manifest.get("finish", {}),
         "paintedRegions": manifest.get("paintedRegions", []),
@@ -860,8 +867,11 @@ def apply_cs2_manifest_evidence(spec: dict, manifest: dict) -> dict:
         "confidence": manifest.get("confidence", {}),
         "provenance": manifest.get("provenance", {}),
         "warnings": manifest.get("warnings", []),
+        "gloveMultiView": manifest.get("gloveMultiView"),
     }
     spec["cs2Intake"] = intake
+    if isinstance(manifest.get("gloveMultiView"), dict):
+        spec["gloveMultiView"] = manifest["gloveMultiView"]
     spec["exactnessTier"] = manifest.get("exactnessTier")
     if isinstance(manifest.get("camera"), dict) and manifest["camera"].get("referenceCamera"):
         spec["referenceCamera"] = manifest["camera"]["referenceCamera"]

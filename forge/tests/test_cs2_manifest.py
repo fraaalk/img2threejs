@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from typing import Any
 
 from forge.stage1_intake.cs2_manifest import (
     apply_confirmation,
@@ -14,6 +15,7 @@ from forge.stage1_intake.cs2_manifest import (
     normalize_manifest,
     persist_manifest,
     record_retrieval_outcome,
+    validate_glove_multiview,
     validate_manifest,
 )
 
@@ -36,6 +38,10 @@ def write_png(path: Path, width: int = 128, height: int = 128) -> None:
 
 
 class Cs2ManifestTests(unittest.TestCase):
+    def glove_manifest(self) -> dict[str, Any]:
+        fixture = Path(__file__).parent / "fixtures" / "glove_multiview_valid.json"
+        return json.loads(fixture.read_text(encoding="utf-8"))
+
     def test_primary_only_without_name_proceeds_generically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             reference = Path(directory) / "knife.png"
@@ -124,10 +130,58 @@ class Cs2ManifestTests(unittest.TestCase):
             write_png(reference)
             manifest = build_manifest(reference)
             persist_manifest(manifest, output)
-            self.assertEqual(json.loads(output.read_text())["schemaVersion"], 2)
+            self.assertEqual(json.loads(output.read_text())["schemaVersion"], 3)
             brief = output.parent / "cs2-internal-brief.json"
             self.assertEqual(json.loads(brief.read_text())["authority"], "report-only")
             self.assertFalse(output.with_suffix(".json.tmp").exists())
+
+    def test_full_finger_glove_requires_four_anatomical_registered_views(self) -> None:
+        manifest = {
+            "schemaVersion": 3, "state": "proceed", "itemFamily": "glove", "subtype": "sport-gloves",
+            "route": "reference-projection", "exactnessTier": "image-only",
+            "primaryImage": {"role": "primary", "path": "glove.png"}, "genericHandoff": {},
+        }
+        self.assertFalse(validate_manifest(manifest))
+
+    def test_full_finger_glove_manifest_preserves_anatomical_views(self) -> None:
+        manifest = self.glove_manifest()
+
+        self.assertIsNone(validate_glove_multiview(manifest))
+        self.assertTrue(validate_manifest(manifest))
+
+    def test_glove_multiview_rejects_legacy_roles_missing_thumb_and_surface_swap(self) -> None:
+        cases = (
+            ("legacy-role", lambda manifest: manifest["gloveMultiView"]["views"][0].__setitem__("role", "front"), "GLOVE_MISSING_VIEW"),
+            ("missing-thumb", lambda manifest: manifest["gloveMultiView"]["views"][0]["digits"].__setitem__("thumb", "out_of_frame"), "GLOVE_REQUIRED_DIGIT_NOT_OBSERVED"),
+            ("surface-swap", lambda manifest: manifest["gloveMultiView"]["textureAssignments"][0].__setitem__("sourceViewId", "left-palmar"), "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"),
+        )
+
+        for _name, mutate, expected in cases:
+            manifest = self.glove_manifest()
+            mutate(manifest)
+            self.assertEqual(validate_glove_multiview(manifest), expected)
+
+    def test_glove_multiview_rejects_mixed_physical_objects_and_thumb_surface_swap(self) -> None:
+        manifest = self.glove_manifest()
+        manifest["gloveMultiView"]["views"][1]["physicalObjectId"] = "other-left"
+        self.assertEqual(validate_glove_multiview(manifest), "GLOVE_VIEW_ASSOCIATION_INVALID")
+
+        manifest = self.glove_manifest()
+        manifest["gloveMultiView"]["regions"].append({"regionId": "thumb-dorsal", "evidenceState": "observed", "sourceViewIds": ["left-dorsal"], "confidence": 0.9, "reason": "visible thumb"})
+        manifest["gloveMultiView"]["textureAssignments"].append({"regionId": "thumb-dorsal", "materialSlot": "dorsal", "uvIsland": "thumb-dorsal", "sourceViewId": "left-palmar", "projectionMask": "thumb-mask", "overlapPriority": 2, "channels": {"baseColor": "sRGB"}})
+        self.assertEqual(validate_glove_multiview(manifest), "GLOVE_TEXTURE_OWNERSHIP_CONFLICT")
+
+    def test_accepting_a_legacy_glove_candidate_requests_input_without_resetting_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "glove.png"
+            write_png(reference)
+            classification = build_classification_record("glove", "sport-gloves", 0.99, ["view:dorsal:subject"])
+            manifest = build_manifest(reference, classification)
+
+            accepted = apply_confirmation(manifest, "accept", manifest["identityCandidates"][0]["id"])
+
+            self.assertEqual(accepted["state"], "request-input")
+            self.assertEqual(accepted["identityDecision"]["reason"], "GLOVE_MULTIVIEW_REQUIRED")
 
 
 if __name__ == "__main__":

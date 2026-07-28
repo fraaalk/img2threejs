@@ -130,3 +130,16 @@ Dùng khi **texture/màu/pattern** sai (không phải hình khối).
 - **Vùng nhìn thấy ở CS2**: mu bàn tay + khớp + ngón + cổ găng là nơi lỗi dễ lộ nhất; lòng bàn tay hầu như khuất — ưu tiên fidelity mặt lưng (dorsal).
 
 _Đã xong: [dao](knives.md), [pistol](pistols.md), gloves. Các loại còn lại (SMG / rifle / sniper) — mỗi loại một file trong `docs/cs2-anatomy/`._
+
+## 5. Quy chuẩn dorsal/palmar cho glove có ngón — Handed glove view convention
+
+Không dùng quy ước broadside của pistol/knife cho Sport Gloves. `dorsal` và `palmar` là hai camera nhìn vào cùng một đôi găng có bốn ngón + ngón cái; vì vậy vị trí trái/phải trên ảnh palmar bị đảo khi quy về cùng object-space. `FRONT`/`BACK` chỉ là alias lịch sử cho người đọc; cấm xuất hiện trong field role của manifest, projection descriptor, hay review fixture.
+
+- Object-space chuẩn: `+Y` từ cổ găng lên đầu ngón, `+Z` là mu bàn tay/dorsal, `-Z` là lòng bàn tay/palm.
+- Crop chuẩn là găng trái và phải bao gồm toàn bộ thumb, bốn finger stalls, finger gussets, palm/cuff và silhouette. Không chấp nhận crop chỉ có bốn ngón.
+- Găng phải được tạo bằng mirror theo local `X`; không dựng như một broadside thứ hai rồi xoay tùy ý.
+- Trong crop dorsal chuẩn, thumb của găng trái nằm về `+X`; sau mirror, thumb găng phải nằm về `-X`.
+- Fixed palmar crop đặt camera ở `-Z` nhìn về origin, mesh không xoay, `up=+Y`. `PI` quanh local `Y` chỉ là inspection transform riêng; cấm dùng đồng thời với camera `-Z` cho intake, projection hoặc fixed review. So sánh 2D trái/phải trực tiếp giữa dorsal và palmar là sai.
+- Projection chỉ là finish trên shell có độ dày; không được dùng projection để thay thế thumb, finger stalls, gussets, cuff hoặc palm volume.
+
+Lesson learned từ Hedge Maze: crop trung gian có biên phải dừng trước vùng thumb nằm về phía tâm đôi găng sẽ biến glove năm ngón thành glove bốn ngón. Vì vậy phải xác định tâm của từng glove trong ảnh composite, mở crop qua hết thumb và cuff, rồi kiểm tra đủ 4 finger stalls + 1 thumb trước khi de-light, BM25/spec hoặc projection. Đây là quy chuẩn bắt buộc cho glove adapter và mọi review silhouette/projection sau này.

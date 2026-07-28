@@ -5,15 +5,44 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "stage4_review"))
 
-from cs2_review import evaluate_family_review, evaluate_knife_review, load_review_scene  # noqa: E402
-from append_review import main as append_review_main  # noqa: E402
+from forge.stage4_review.cs2_review import evaluate_family_review, evaluate_glove_review, evaluate_knife_review, load_review_scene
+from forge.stage4_review.append_review import main as append_review_main
 
 
 class Cs2ReviewGateTest(unittest.TestCase):
+    scene: dict[str, Any] = {}
+    manifest: dict[str, Any] = {}
+
+    def glove_manifest(self) -> dict[str, Any]:
+        return json.loads((ROOT / "tests" / "fixtures" / "glove_multiview_valid.json").read_text(encoding="utf-8"))
+
+    def glove_captures(self) -> dict[str, Any]:
+        fixed = {
+            "left-dorsal": ("left", "dorsal", [0, 0, 1]),
+            "left-palmar": ("left", "palmar", [0, 0, -1]),
+            "right-dorsal": ("right", "dorsal", [0, 0, 1]),
+            "right-palmar": ("right", "palmar", [0, 0, -1]),
+        }
+        captures: dict[str, Any] = {
+            capture_id: {
+                "hand": hand,
+                "role": role,
+                "cameraPosition": position,
+                "regionCoverage": {"shell": 0.97},
+                "requiredOccupancy": {"thumb": 0.99, "cuff": 0.99},
+                "textureOwnership": 1,
+                "reversedFacePixels": 0,
+            }
+            for capture_id, (hand, role, position) in fixed.items()
+        }
+        captures["left-orbit-35"] = {"silhouetteXor": 0.08, "normalDirectionChange": 0.12}
+        captures["right-orbit-35"] = {"silhouetteXor": 0.08, "normalDirectionChange": 0.12}
+        return captures
+
     def setUp(self) -> None:
         self.scene = load_review_scene(ROOT / "tests" / "fixtures" / "knife_review_scene.json")
         self.manifest = {
@@ -28,7 +57,7 @@ class Cs2ReviewGateTest(unittest.TestCase):
             "assumptions": {"hiddenRegions": "inferred"},
         }
 
-    def passing_inputs(self) -> dict:
+    def passing_inputs(self) -> dict[str, Any]:
         return {
             "silhouetteIoU": 0.91,
             "aspectRatioDelta": 0.02,
@@ -110,6 +139,21 @@ class Cs2ReviewGateTest(unittest.TestCase):
         self.assertEqual(report["action"], "refine-code")
         self.assertIn("projection-coverage", report["failedGates"])
         self.assertIn("critical-feature:karambit_ring", report["failedGates"])
+
+    def test_glove_review_uses_fixed_anatomical_captures_and_rejects_mutations(self) -> None:
+        manifest = self.glove_manifest()
+        scene = json.loads((ROOT / "tests" / "fixtures" / "glove_review_scene.json").read_text(encoding="utf-8"))
+
+        report = evaluate_glove_review(manifest, scene, self.glove_captures())
+        self.assertEqual(report["verdict"], "pass")
+
+        swapped = self.glove_captures()
+        swapped["left-palmar"]["role"] = "dorsal"
+        self.assertIn("GLOVE_SURFACE_SWAP", evaluate_glove_review(manifest, scene, swapped)["failedGates"])
+
+        missing_thumb = self.glove_captures()
+        missing_thumb["left-dorsal"]["requiredOccupancy"]["thumb"] = 0.5
+        self.assertIn("GLOVE_REQUIRED_DIGIT_NOT_OBSERVED", evaluate_glove_review(manifest, scene, missing_thumb)["failedGates"])
 
     def test_degenerate_orbit_is_blocking_and_missing_scene_metadata_is_error(self) -> None:
         inputs = self.passing_inputs()

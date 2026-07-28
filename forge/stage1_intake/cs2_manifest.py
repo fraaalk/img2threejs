@@ -19,11 +19,36 @@ from forge.stage1_intake.detect_cs2 import detect_cs2_signals  # noqa: E402
 from forge.stage1_intake.probe_image import probe  # noqa: E402
 from forge.stage2_spec.cs2_adapters import resolve_family_adapter  # noqa: E402
 
-SCHEMA_VERSION: Final[int] = 2
+SCHEMA_VERSION: Final[int] = 3
 ROUTES: Final[frozenset[str]] = frozenset({"reference-projection", "authored-texture", "procedural-finish"})
 TIERS: Final[frozenset[str]] = frozenset({"image-only", "metadata-assisted", "exact-texture"})
 STATES: Final[frozenset[str]] = frozenset({"proceed", "request-input", "rejected"})
 CONFIRMATION_ACTIONS: Final[frozenset[str]] = frozenset({"accept", "none-of-these", "continue-generically", "add-secondary"})
+GLOVE_VIEW_ROLES: Final[frozenset[str]] = frozenset({"dorsal", "palmar"})
+GLOVE_HANDS: Final[frozenset[str]] = frozenset({"left", "right"})
+GLOVE_TOPOLOGIES: Final[frozenset[str]] = frozenset({"full-finger", "fingerless", "wrap"})
+GLOVE_DIGITS: Final[tuple[str, ...]] = ("thumb", "index", "middle", "ring", "little")
+GLOVE_REGION_IDS: Final[frozenset[str]] = frozenset({
+    "dorsal-shell", "palmar-panel", "thumb-dorsal", "thumb-palmar", "index", "middle",
+    "ring", "little", "finger-gussets", "thumb-saddle", "cuff", "sidewalls", "lining",
+    "cavity", "thickness",
+})
+GLOVE_EVIDENCE_STATES: Final[frozenset[str]] = frozenset({"observed", "inferred", "untextured"})
+GLOVE_REGION_ROLES: Final[dict[str, str]] = {
+    "dorsal-shell": "dorsal",
+    "thumb-dorsal": "dorsal",
+    "palmar-panel": "palmar",
+    "thumb-palmar": "palmar",
+}
+
+
+def _request_glove_input(result: dict[str, Any], candidate_id: str | None, reason: str) -> dict[str, Any]:
+    result["state"] = "request-input"
+    result["identityDecision"] = {"status": reason.lower(), "candidateId": candidate_id, "reason": reason}
+    result["warnings"].append(reason)
+    result["genericHandoff"]["resolvedIdentity"] = result["resolvedIdentity"]
+    result["genericHandoff"]["componentAdapter"] = result.get("componentAdapter")
+    return result
 def build_classification_record(
     item_family: str,
     subtype: str | None,
@@ -184,6 +209,10 @@ def apply_confirmation(manifest: dict[str, Any], action: str, candidate_id: str 
         result["enrichment"]["retrieval"] = {"status": "eligible", "reason": None}
         result["itemFamily"] = adapter.family
         result["subtype"] = adapter.subtype
+        if adapter.family == "glove":
+            glove_error = validate_glove_multiview(result)
+            if glove_error is not None:
+                return _request_glove_input(result, candidate_id, glove_error)
     elif action == "none-of-these":
         result["identityCandidates"] = []
         result["identityDecision"] = {"status": "rejected-all"}
@@ -211,6 +240,14 @@ def record_retrieval_outcome(manifest: dict[str, Any], status: str, reason: str 
 def normalize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest.get("schemaVersion") == SCHEMA_VERSION:
         return dict(manifest)
+    if manifest.get("schemaVersion") == 2:
+        result = dict(manifest)
+        result["schemaVersion"] = SCHEMA_VERSION
+        if result.get("itemFamily") == "glove" and result.get("state") == "proceed":
+            result["state"] = "request-input"
+            result["identityDecision"] = {"status": "glove-multiview-required", "reason": "GLOVE_MULTIVIEW_REQUIRED"}
+            result.setdefault("warnings", []).append("GLOVE_MULTIVIEW_REQUIRED")
+        return result
     if manifest.get("schemaVersion") != 1:
         raise ValueError("unsupported intake schema version")
     views = manifest.get("sourceViews")
@@ -226,12 +263,160 @@ def normalize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _finite_unit(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0.0 <= float(value) <= 1.0
+
+
+def _landmark_in_crop(landmark: Any, crop: dict[str, Any], image: dict[str, Any]) -> bool:
+    if not isinstance(landmark, dict):
+        return False
+    if not all(_finite_unit(landmark.get(key)) for key in ("x", "y", "width", "height")):
+        return False
+    width = image.get("width")
+    height = image.get("height")
+    if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
+        return False
+    margin = max(2.0 / min(width, height), 0.0025)
+    x = float(landmark["x"])
+    y = float(landmark["y"])
+    landmark_width = float(landmark["width"])
+    landmark_height = float(landmark["height"])
+    return (
+        x >= float(crop["x"]) + margin
+        and y >= float(crop["y"]) + margin
+        and x + landmark_width <= float(crop["x"]) + float(crop["width"]) - margin
+        and y + landmark_height <= float(crop["y"]) + float(crop["height"]) - margin
+    )
+
+
+def validate_glove_multiview(manifest: dict[str, Any]) -> str | None:
+    contract = manifest.get("gloveMultiView")
+    if not isinstance(contract, dict) or contract.get("version") != "glove-multiview-v1":
+        return "GLOVE_MULTIVIEW_REQUIRED"
+    topology = contract.get("topologyKind")
+    if topology not in GLOVE_TOPOLOGIES or contract.get("canonicalHand") != "left":
+        return "GLOVE_MULTIVIEW_INVALID_TOPOLOGY"
+    frame = contract.get("canonicalFrame")
+    if frame != {"origin": "wrist-centre", "x": "thumb-side", "y": "wrist-to-tips", "z": "dorsal"}:
+        return "GLOVE_CANONICAL_FRAME_INVALID"
+    views = contract.get("views")
+    if not isinstance(views, list) or len(views) != 4:
+        return "GLOVE_MISSING_VIEW"
+    expected = {("left", "dorsal"), ("left", "palmar"), ("right", "dorsal"), ("right", "palmar")}
+    pairs: set[tuple[str, str]] = set()
+    view_ids: set[str] = set()
+    pose_ids: set[str] = set()
+    pair_ids: set[str] = set()
+    object_by_hand: dict[str, str] = {}
+    source_by_hand_role: dict[tuple[str, str], dict[str, Any]] = {}
+    for view in views:
+        if not isinstance(view, dict):
+            return "GLOVE_MISSING_VIEW"
+        hand = view.get("hand")
+        role = view.get("role")
+        crop = view.get("crop")
+        digits = view.get("digits")
+        image = view.get("image")
+        camera = view.get("cameraToLocal")
+        view_id = view.get("viewId")
+        physical_object_id = view.get("physicalObjectId")
+        pair_id = view.get("pairId")
+        pose_id = view.get("poseId")
+        if (
+            hand not in GLOVE_HANDS
+            or role not in GLOVE_VIEW_ROLES
+            or not isinstance(crop, dict)
+            or not isinstance(digits, dict)
+            or not isinstance(image, dict)
+            or not isinstance(camera, dict)
+            or not all(isinstance(value, str) and value for value in (view_id, physical_object_id, pair_id, pose_id))
+        ):
+            return "GLOVE_MISSING_VIEW"
+        if view_id in view_ids:
+            return "GLOVE_DUPLICATE_VIEW_ID"
+        view_ids.add(str(view_id))
+        pose_ids.add(str(pose_id))
+        pair_ids.add(str(pair_id))
+        existing_object = object_by_hand.setdefault(str(hand), str(physical_object_id))
+        if existing_object != physical_object_id:
+            return "GLOVE_VIEW_ASSOCIATION_INVALID"
+        if not all(_finite_unit(crop.get(key)) for key in ("x", "y", "width", "height")) or float(crop["width"]) == 0 or float(crop["height"]) == 0:
+            return "GLOVE_CROP_INVALID"
+        if float(crop["x"]) + float(crop["width"]) > 1 or float(crop["y"]) + float(crop["height"]) > 1:
+            return "GLOVE_CROP_INVALID"
+        if not all(isinstance(image.get(key), str) and image[key] for key in ("path", "contentHash")) or not all(isinstance(image.get(key), int) and image[key] > 0 for key in ("width", "height")):
+            return "GLOVE_SOURCE_IMAGE_INVALID"
+        if not all(isinstance(camera.get(key), list) and len(camera[key]) == 3 and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in camera[key]) for key in ("position", "forward", "up")):
+            return "GLOVE_CAMERA_INVALID"
+        if topology == "full-finger":
+            landmarks = view.get("landmarks")
+            if not isinstance(landmarks, dict) or any(digits.get(digit) != "observed" for digit in GLOVE_DIGITS):
+                return "GLOVE_REQUIRED_DIGIT_NOT_OBSERVED"
+            if any(not _landmark_in_crop(landmarks.get(digit), crop, image) for digit in GLOVE_DIGITS):
+                return "GLOVE_REQUIRED_DIGIT_NOT_OBSERVED"
+            if view.get("cuff") != "observed" or not _landmark_in_crop(landmarks.get("cuff"), crop, image):
+                return "GLOVE_CUFF_TRUNCATED"
+        pairs.add((hand, role))
+        source_by_hand_role[(str(hand), str(role))] = view
+    if pairs != expected:
+        return "GLOVE_MISSING_VIEW"
+    if len(pose_ids) != 1 or len(pair_ids) != 1:
+        return "GLOVE_VIEW_ASSOCIATION_INVALID"
+    for hand in GLOVE_HANDS:
+        dorsal_view = source_by_hand_role[(hand, "dorsal")]
+        palmar_view = source_by_hand_role[(hand, "palmar")]
+        if dorsal_view["image"]["contentHash"] == palmar_view["image"]["contentHash"]:
+            return "GLOVE_VIEW_ASSOCIATION_INVALID"
+    role_by_view_id = {view["viewId"]: view["role"] for view in views}
+    regions = contract.get("regions")
+    assignments = contract.get("textureAssignments")
+    if not isinstance(regions, list) or not isinstance(assignments, list):
+        return "GLOVE_EVIDENCE_MISSING"
+    region_states: dict[str, str] = {}
+    for region in regions:
+        if not isinstance(region, dict) or region.get("regionId") not in GLOVE_REGION_IDS or region.get("evidenceState") not in GLOVE_EVIDENCE_STATES:
+            return "GLOVE_EVIDENCE_MISSING"
+        region_id = region["regionId"]
+        if region_id in region_states or not _finite_unit(region.get("confidence")) or not isinstance(region.get("reason"), str):
+            return "GLOVE_EVIDENCE_MISSING"
+        state = region["evidenceState"]
+        source_view_ids = region.get("sourceViewIds")
+        if state == "observed" and (not isinstance(source_view_ids, list) or not source_view_ids or any(source_view_id not in role_by_view_id for source_view_id in source_view_ids)):
+            return "GLOVE_UNDECLARED_INFERENCE"
+        if state != "observed" and not isinstance(region.get("inferenceMethod"), str):
+            return "GLOVE_UNDECLARED_INFERENCE"
+        region_states[region_id] = state
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            return "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"
+        region_id = assignment.get("regionId")
+        source_view_id = assignment.get("sourceViewId")
+        channels = assignment.get("channels")
+        if region_id not in region_states or not isinstance(assignment.get("materialSlot"), str) or not isinstance(assignment.get("uvIsland"), str) or not isinstance(assignment.get("projectionMask"), str) or not isinstance(assignment.get("overlapPriority"), int) or not isinstance(channels, dict):
+            return "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"
+        if source_view_id is not None and source_view_id not in role_by_view_id:
+            return "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"
+        source_role = role_by_view_id.get(source_view_id)
+        required_role = GLOVE_REGION_ROLES.get(region_id)
+        if required_role is not None and source_role not in {None, required_role}:
+            return "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"
+        if region_states[region_id] == "observed" and source_view_id not in next(region["sourceViewIds"] for region in regions if region["regionId"] == region_id):
+            return "GLOVE_TEXTURE_OWNERSHIP_CONFLICT"
+    return None
+
+
+def _valid_glove_multiview(manifest: dict[str, Any]) -> bool:
+    return validate_glove_multiview(manifest) is None
+
+
 def validate_manifest(manifest: dict[str, Any]) -> bool:
     try:
         normalized = normalize_manifest(manifest)
     except ValueError:
         return False
     primary = normalized.get("primaryImage")
+    if normalized.get("itemFamily") == "glove" and normalized.get("state") == "proceed" and not _valid_glove_multiview(normalized):
+        return False
     return isinstance(primary, dict) and primary.get("role") == "primary" and normalized.get("state") in STATES and normalized.get("route") in ROUTES and normalized.get("exactnessTier") in TIERS and isinstance(normalized.get("genericHandoff"), dict)
 
 

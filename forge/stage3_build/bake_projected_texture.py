@@ -21,9 +21,42 @@ import sys
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from forge.stage1_intake.cs2_manifest import validate_glove_multiview
+
 
 VALID_PROJECTION_MODES = ("perspective-camera-projection", "orthographic-front-projection", "triplanar-fallback")
 VALID_UNSEEN_STRATEGIES = ("mirror-symmetry", "palette-continue", "request-additional-view", "leave-unprojected")
+
+
+def build_glove_descriptor(manifest: dict[str, Any], mesh_id: str) -> dict[str, Any]:
+    validation_error = validate_glove_multiview(manifest)
+    if validation_error is not None:
+        return {"gloveProjectionBake": {"version": "glove-projection-bake-v1", "status": "request-input", "reason": validation_error}}
+    contract = manifest["gloveMultiView"]
+    views = contract["views"]
+    regions = contract["regions"]
+    assignments = contract["textureAssignments"]
+    source_views = {view["viewId"]: view for view in views}
+    return {
+        "gloveProjectionBake": {
+            "version": "glove-projection-bake-v1",
+            "status": "ready-for-locked-asset",
+            "targetMeshId": mesh_id,
+            "canonicalFrame": contract["canonicalFrame"],
+            "sourceViews": [{"viewId": view_id, "role": source["role"], "image": source["image"], "crop": source["crop"]} for view_id, source in source_views.items()],
+            "regions": regions,
+            "assignments": assignments,
+            "assetContract": {
+                "canonicalLeft": {"determinant": 1, "requiredRegions": sorted(region["regionId"] for region in regions)},
+                "derivedRight": {"authoringReflection": "local-x", "releaseDeterminant": 1, "reverseWinding": True, "recomputeNormals": True, "recomputeTangents": True},
+                "runtime": {"negativeScale": False, "uvGeneration": False},
+            },
+            "unseenRegions": [region["regionId"] for region in regions if region["evidenceState"] != "observed"],
+        }
+    }
 
 
 def clamp01(value: float) -> float:
@@ -59,6 +92,8 @@ def build_descriptor(args: argparse.Namespace) -> dict[str, Any]:
         if not isinstance(intake_value, dict):
             raise ValueError("CS2 intake manifest must be a JSON object")
         intake = intake_value
+        if intake.get("itemFamily") == "glove":
+            return build_glove_descriptor(intake, args.mesh_id)
         if not args.reference_image:
             views = intake.get("sourceViews", [])
             primary = next((view for view in views if isinstance(view, dict) and view.get("role") == "primary"), None) if isinstance(views, list) else None

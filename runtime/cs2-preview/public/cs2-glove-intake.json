@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 3,
+  "state": "proceed",
+  "itemFamily": "glove",
+  "subtype": "sport-gloves",
+  "componentAdapter": "cs2-glove-v1",
+  "route": "reference-projection",
+  "exactnessTier": "image-only",
+  "textureSource": "user-supplied-reference-pair",
+  "classification": {
+    "itemFamily": "glove",
+    "subtype": "sport-gloves",
+    "confidence": 1.0,
+    "provider": "user-explicit-item-name",
+    "version": "1",
+    "evidenceRefs": ["user-item-name", "front-reference", "palm-reference"]
+  },
+  "resolvedIdentity": {
+    "itemFamily": "glove",
+    "subtype": "sport-gloves",
+    "name": "★ Sport Gloves | Hedge Maze (Field-Tested)",
+    "confidence": 1.0,
+    "provider": "user-explicit-item-name",
+    "version": "1"
+  },
+  "sourceViews": [
+    {
+      "role": "primary",
+      "path": "/glove-front.png",
+      "width": 2560,
+      "height": 1440,
+      "orientation": "dorsal-exterior-pair",
+      "admission": {
+        "admitted": true,
+        "status": "paired-reference",
+        "note": "Two coherent glove silhouettes intentionally retained as a matched pair."
+      }
+    },
+    {
+      "role": "secondary",
+      "path": "/glove-back.png",
+      "width": 2560,
+      "height": 1440,
+      "orientation": "palmar-interior-pair",
+      "admission": {
+        "admitted": true,
+        "status": "paired-reference",
+        "note": "Two coherent glove silhouettes intentionally retained as a matched pair."
+      }
+    }
+  ],
+  "primaryImage": {"role": "primary", "path": "/glove-front.png"},
+  "genericHandoff": {},
+  "gloveMultiView": {
+    "version": "glove-multiview-v1",
+    "topologyKind": "full-finger",
+    "canonicalHand": "left",
+    "canonicalFrame": {"origin": "wrist-centre", "x": "thumb-side", "y": "wrist-to-tips", "z": "dorsal"},
+    "views": [
+      {"viewId":"left-dorsal","physicalObjectId":"left-01","pairId":"hedge-maze-pair","hand":"left","role":"dorsal","poseId":"open-flat-01","image":{"path":"/glove-front.png","contentHash":"hedge-maze-dorsal","width":1280,"height":720},"crop":{"space":"normalized-image-v1","x":0.10,"y":0.02,"width":0.37,"height":0.94},"cameraToLocal":{"position":[0,0,1],"forward":[0,0,-1],"up":[0,1,0]},"digits":{"thumb":"observed","index":"observed","middle":"observed","ring":"observed","little":"observed"},"cuff":"observed","landmarks":{"thumb":{"x":0.13,"y":0.40,"width":0.04,"height":0.10},"index":{"x":0.20,"y":0.10,"width":0.04,"height":0.20},"middle":{"x":0.26,"y":0.08,"width":0.04,"height":0.22},"ring":{"x":0.32,"y":0.11,"width":0.04,"height":0.20},"little":{"x":0.38,"y":0.17,"width":0.03,"height":0.16},"cuff":{"x":0.16,"y":0.80,"width":0.20,"height":0.08}}},
+      {"viewId":"left-palmar","physicalObjectId":"left-01","pairId":"hedge-maze-pair","hand":"left","role":"palmar","poseId":"open-flat-01","image":{"path":"/glove-back.png","contentHash":"hedge-maze-palmar","width":1280,"height":720},"crop":{"space":"normalized-image-v1","x":0.10,"y":0.02,"width":0.37,"height":0.94},"cameraToLocal":{"position":[0,0,-1],"forward":[0,0,1],"up":[0,1,0]},"digits":{"thumb":"observed","index":"observed","middle":"observed","ring":"observed","little":"observed"},"cuff":"observed","landmarks":{"thumb":{"x":0.13,"y":0.40,"width":0.04,"height":0.10},"index":{"x":0.20,"y":0.10,"width":0.04,"height":0.20},"middle":{"x":0.26,"y":0.08,"width":0.04,"height":0.22},"ring":{"x":0.32,"y":0.11,"width":0.04,"height":0.20},"little":{"x":0.38,"y":0.17,"width":0.03,"height":0.16},"cuff":{"x":0.16,"y":0.80,"width":0.20,"height":0.08}}},
+      {"viewId":"right-dorsal","physicalObjectId":"right-01","pairId":"hedge-maze-pair","hand":"right","role":"dorsal","poseId":"open-flat-01","image":{"path":"/glove-front.png","contentHash":"hedge-maze-dorsal","width":2560,"height":1440},"crop":{"space":"normalized-image-v1","x":0.53,"y":0.02,"width":0.37,"height":0.94},"cameraToLocal":{"position":[0,0,1],"forward":[0,0,-1],"up":[0,1,0]},"digits":{"thumb":"observed","index":"observed","middle":"observed","ring":"observed","little":"observed"},"cuff":"observed","landmarks":{"thumb":{"x":0.56,"y":0.40,"width":0.04,"height":0.10},"index":{"x":0.63,"y":0.10,"width":0.04,"height":0.20},"middle":{"x":0.69,"y":0.08,"width":0.04,"height":0.22},"ring":{"x":0.75,"y":0.11,"width":0.04,"height":0.20},"little":{"x":0.81,"y":0.17,"width":0.03,"height":0.16},"cuff":{"x":0.59,"y":0.80,"width":0.20,"height":0.08}}},
+      {"viewId":"right-palmar","physicalObjectId":"right-01","pairId":"hedge-maze-pair","hand":"right","role":"palmar","poseId":"open-flat-01","image":{"path":"/glove-back.png","contentHash":"hedge-maze-palmar","width":2560,"height":1440},"crop":{"space":"normalized-image-v1","x":0.53,"y":0.02,"width":0.37,"height":0.94},"cameraToLocal":{"position":[0,0,-1],"forward":[0,0,1],"up":[0,1,0]},"digits":{"thumb":"observed","index":"observed","middle":"observed","ring":"observed","little":"observed"},"cuff":"observed","landmarks":{"thumb":{"x":0.56,"y":0.40,"width":0.04,"height":0.10},"index":{"x":0.63,"y":0.10,"width":0.04,"height":0.20},"middle":{"x":0.69,"y":0.08,"width":0.04,"height":0.22},"ring":{"x":0.75,"y":0.11,"width":0.04,"height":0.20},"little":{"x":0.81,"y":0.17,"width":0.03,"height":0.16},"cuff":{"x":0.59,"y":0.80,"width":0.20,"height":0.08}}}
+    ],
+    "regions": [
+      {"regionId":"dorsal-shell","evidenceState":"observed","sourceViewIds":["left-dorsal","right-dorsal"],"confidence":0.96,"reason":"visible dorsal shell"},
+      {"regionId":"palmar-panel","evidenceState":"observed","sourceViewIds":["left-palmar","right-palmar"],"confidence":0.96,"reason":"visible palm panel"},
+      {"regionId":"sidewalls","evidenceState":"inferred","sourceViewIds":[],"confidence":0.48,"reason":"not broadside-visible","inferenceMethod":"symmetric-shell"}
+    ],
+    "textureAssignments": [
+      {"regionId":"dorsal-shell","materialSlot":"dorsal","uvIsland":"dorsal-shell","sourceViewId":"left-dorsal","projectionMask":"dorsal-mask","overlapPriority":2,"channels":{"baseColor":"sRGB"}},
+      {"regionId":"palmar-panel","materialSlot":"palmar","uvIsland":"palmar-panel","sourceViewId":"left-palmar","projectionMask":"palmar-mask","overlapPriority":2,"channels":{"baseColor":"sRGB"}}
+    ]
+  },
+  "observedObject": {
+    "geometry": "paired short-cuff sport gloves with five finger stalls, thumb gussets, padded palm, dorsal knuckle guards, and wrist closures",
+    "materials": ["black textured synthetic leather", "emerald green textile", "gray padded palm", "rigid gray knuckle plates", "green polymer wrist frame"],
+    "details": ["segmented dorsal knuckle ribs", "finger-tip caps", "finger gussets", "palm wear/scuff patches", "wrist strap hardware", "stitched seams"]
+  },
+  "paintedRegions": ["dorsal-shell", "finger-stalls", "thumb-gussets", "palm-side-panels", "wrist-frame"],
+  "unpaintedRegions": ["palm-pad", "knuckle-rib-edges", "stitching"],
+  "camera": {
+    "projectionMode": "perspective-camera-projection",
+    "fovDegrees": 32,
+    "position": [0.0, 0.05, 5.2],
+    "target": [0.0, 0.05, 0.0]
+  },
+  "environment": {"available": true, "hash": "emerald-inspection-bay-v1"},
+  "confidence": {"overall": 0.94, "visibleGeometry": 0.98, "hiddenRegions": 0.48},
+  "assumptions": [
+    "Both supplied images show the same left/right matched pair.",
+    "Hidden wrist and finger interior geometry is inferred from the visible paired views.",
+    "The procedural mesh is an image-matched approximation, not a native game mesh."
+  ]
+}

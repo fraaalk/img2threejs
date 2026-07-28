@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "itemFamily": "glove",
+  "subtype": "sport-gloves",
+  "componentAdapter": "cs2-glove-v1",
+  "name": "★ Sport Gloves | Hedge Maze (Field-Tested)",
+  "route": "reference-projection",
+  "exactnessTier": "image-only",
+  "environmentAvailable": true,
+  "materialChannels": ["albedo", "roughness", "normal", "ao", "wear-mask"],
+  "wear": {"state": "field-tested", "floatRange": [0.06, 0.8], "visibleZones": ["knuckles", "fingertips", "palm-edges"]},
+  "componentTree": [
+    {"id":"root","name":"Matched glove pair","primitive":"assembled-solid","role":"root","level":"macro"},
+    {"id":"palm","name":"Palm shell","primitive":"rounded-box","role":"body","level":"macro"},
+    {"id":"finger-stalls","name":"Five finger stalls","primitive":"capsule-cluster","role":"appendage","level":"macro","localFeatures":["green fingertips","dark dorsal caps","sewn gussets"]},
+    {"id":"thumb-gusset","name":"Thumb gusset","primitive":"capsule","role":"appendage","level":"meso"},
+    {"id":"knuckle-guards","name":"Segmented knuckle guards","primitive":"extrude-plates","role":"guard","level":"meso","localFeatures":["raised ribs","dark plate insets"]},
+    {"id":"palm-pads","name":"Gray palm pads","primitive":"rounded-box","role":"pad","level":"meso","localFeatures":["wear patches","stitched perimeter"]},
+    {"id":"wrist-cuff","name":"Short wrist cuff","primitive":"rounded-box","role":"connector","level":"meso"},
+    {"id":"wrist-frame","name":"Green wrist frame","primitive":"extrude-loop","role":"hardware","level":"micro"},
+    {"id":"stitching","name":"Perimeter stitching","primitive":"repetition-system","role":"micro","level":"micro"},
+    {"id":"wear","name":"Field-Tested wear","primitive":"reference-projection","role":"surface","level":"micro"}
+  ],
+  "materials": [
+    {"id":"hedge-green","name":"Hedge Maze green textile","baseColor":"#72c83b","roughness":0.68,"metalness":0.02,"localOverrides":["fingertips","thumb-gusset","wrist-frame"]},
+    {"id":"dorsal-black","name":"Dorsal black synthetic leather","baseColor":"#171a1a","roughness":0.82,"metalness":0.03,"localOverrides":["knuckle-guards","finger-backs"]},
+    {"id":"palm-gray","name":"Gray padded palm textile","baseColor":"#818b8b","roughness":0.91,"metalness":0.01,"localOverrides":["palm-pads","wrist-cuff"]},
+    {"id":"rubber-edge","name":"Rubber edge trim","baseColor":"#202b24","roughness":0.75,"metalness":0.02,"localOverrides":["seams","edge-ribs"]}
+  ],
+  "featureReviewTargets": [
+    {"id":"glove-silhouette","name":"Matched glove silhouette and proportions","tier":"critical","minimumScore":0.8},
+    {"id":"glove-color-blocks","name":"Green-black-gray Hedge Maze color blocking","tier":"critical","minimumScore":0.8},
+    {"id":"glove-finger-system","name":"Five-finger and thumb stall layout","tier":"critical","minimumScore":0.78},
+    {"id":"glove-knuckle-guards","name":"Dorsal knuckle ribs and plates","tier":"important","minimumScore":0.7},
+    {"id":"glove-field-tested-wear","name":"Field-Tested wear on palm and tips","tier":"important","minimumScore":0.68}
+  ],
+  "qualityContract": {"qualityBar":"ultra-complex","targetMinDetails":16,"minimumViewpoints":5},
+  "approximations": ["Hidden hand cavity and underside are inferred; paired dorsal/palmar source metadata is validated before the non-production preview loads."]
+}
