@@ -1,0 +1,46 @@
+name: Issue Triage
+
+on:
+  schedule:
+    - cron: "17 9 */2 * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Dry-run lists all candidates; backfill writes notices for historical candidates."
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - backfill
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  TRIAGE_ROLLOUT_AFTER: "2026-07-28T00:00:00Z"
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run issue triage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            args+=(--rollout-after "$TRIAGE_ROLLOUT_AFTER")
+          elif [ "${{ inputs.mode }}" = "dry-run" ]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/issue_triage.py "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
