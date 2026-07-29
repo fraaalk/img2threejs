@@ -11,6 +11,10 @@ from dataclasses import dataclass
 import math
 
 
+FeatureCacheKey = tuple[str, int, int, str, int]
+_FEATURE_CACHE: Dict[FeatureCacheKey, "FeatureSet"] = {}
+
+
 @dataclass
 class Feature:
     """Represents a detected feature in an image."""
@@ -49,14 +53,37 @@ def detect_features(
     if method == "auto":
         method = _select_detection_method(image_path)
 
+    cache_key = _feature_cache_key(image_path, method, max_features)
+    if cache_key is not None and cache_key in _FEATURE_CACHE:
+        return _FEATURE_CACHE[cache_key]
+
     if method == "sift":
-        return _detect_sift(image_path, max_features)
+        detected = _detect_sift(image_path, max_features)
     elif method == "orb":
-        return _detect_orb(image_path, max_features)
+        detected = _detect_orb(image_path, max_features)
     elif method == "edge":
-        return _detect_edge_features(image_path, max_features)
+        detected = _detect_edge_features(image_path, max_features)
     else:
         raise ValueError(f"Unknown detection method: {method}")
+    if cache_key is not None:
+        _FEATURE_CACHE[cache_key] = detected
+    return detected
+
+
+def clear_feature_cache() -> None:
+    _FEATURE_CACHE.clear()
+
+
+def _feature_cache_key(
+    image_path: Path,
+    method: str,
+    max_features: int,
+) -> Optional[FeatureCacheKey]:
+    try:
+        stat = image_path.stat()
+    except OSError:
+        return None
+    return (str(image_path.resolve()), stat.st_mtime_ns, stat.st_size, method, max_features)
 
 
 def _select_detection_method(image_path: Path) -> str:
@@ -69,9 +96,13 @@ def _select_detection_method(image_path: Path) -> str:
     Returns:
         Detection method name
     """
-    # For now, default to edge detection (no OpenCV dependency)
-    # In future, could analyze image complexity to choose
-    return "edge"
+    try:
+        import cv2
+    except ImportError:
+        return "edge"
+    if hasattr(cv2, "SIFT_create"):
+        return "sift"
+    return "orb"
 
 
 def _detect_sift(image_path: Path, max_features: int) -> FeatureSet:
@@ -99,6 +130,8 @@ def _detect_sift(image_path: Path, max_features: int) -> FeatureSet:
 
         # Detect features
         keypoints, descriptors = sift.detectAndCompute(img, None)
+        if descriptors is None:
+            return _detect_edge_features(image_path, max_features)
 
         # Convert to Feature objects
         features = []
@@ -149,6 +182,8 @@ def _detect_orb(image_path: Path, max_features: int) -> FeatureSet:
 
         # Detect features
         keypoints, descriptors = orb.detectAndCompute(img, None)
+        if descriptors is None:
+            return _detect_edge_features(image_path, max_features)
 
         # Convert to Feature objects
         features = []
@@ -156,7 +191,7 @@ def _detect_orb(image_path: Path, max_features: int) -> FeatureSet:
             feature = Feature(
                 x=kp.pt[0],
                 y=kp.pt[1],
-                descriptor=desc.tolist() if desc is not None else None,
+                descriptor=desc.tolist(),
                 strength=kp.response,
                 angle=kp.angle,
             )

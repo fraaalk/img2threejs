@@ -81,11 +81,15 @@ def match_pair(
     """
     matches = []
 
-    # Try to use OpenCV for matching if available
-    try:
-        matches = _match_opencv(features1, features2, ratio_threshold)
-    except ImportError:
-        # Fallback to simple distance-based matching
+    has_descriptors = all(feature.descriptor is not None for feature in features1.features) and all(
+        feature.descriptor is not None for feature in features2.features
+    )
+    if has_descriptors:
+        try:
+            matches = _match_opencv(features1, features2, ratio_threshold)
+        except ImportError:
+            matches = _match_simple(features1, features2, ratio_threshold)
+    else:
         matches = _match_simple(features1, features2, ratio_threshold)
 
     # Calculate confidence based on match count and quality
@@ -137,12 +141,19 @@ def _match_opencv(
     if not desc1 or not desc2:
         return []
 
-    # Convert to numpy arrays
-    desc1 = np.array(desc1, dtype=np.uint8)
-    desc2 = np.array(desc2, dtype=np.uint8)
+    descriptor_dtype = (
+        np.float32
+        if features1.detection_method == "sift" and features2.detection_method == "sift"
+        else np.uint8
+    )
+    matcher_norm = (
+        cv2.NORM_L2 if descriptor_dtype is np.float32 else cv2.NORM_HAMMING
+    )
+    desc1 = np.array(desc1, dtype=descriptor_dtype)
+    desc2 = np.array(desc2, dtype=descriptor_dtype)
 
     # Use BFMatcher with ratio test
-    bf = cv2.BFMatcher()
+    bf = cv2.BFMatcher(matcher_norm)
     raw_matches = bf.knnMatch(desc1, desc2, k=2)
 
     # Apply ratio test
@@ -158,7 +169,7 @@ def _match_opencv(
             feature1=features1.features[m.queryIdx],
             feature2=features2.features[m.trainIdx],
             distance=m.distance,
-            confidence=1.0 - (m.distance / 100.0),  # Normalize to 0-1
+            confidence=max(0.0, min(1.0, 1.0 - (m.distance / 512.0))),
         )
         matches.append(match)
 
@@ -262,4 +273,4 @@ def _calculate_match_confidence(
     # Combine factors
     confidence = match_ratio * avg_confidence
 
-    return min(1.0, confidence)
+    return max(0.0, min(1.0, confidence))

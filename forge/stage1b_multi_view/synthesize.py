@@ -17,16 +17,32 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from .view_counter import count_views, detect_named_views, group_duplicate_views
-from .feature_detector import detect_features
-from .feature_matcher import match_features
-from .pose_estimator import estimate_relative_poses
-from .depth_estimator import estimate_depth
+if __package__ in {None, ""}:
+    project_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(project_root))
+    from forge.stage1b_multi_view.depth_estimator import estimate_depth
+    from forge.stage1b_multi_view.feature_detector import detect_features
+    from forge.stage1b_multi_view.feature_matcher import match_features
+    from forge.stage1b_multi_view.pose_estimator import estimate_relative_poses
+    from forge.stage1b_multi_view.validate_geometry_brief import validate_geometry_brief
+    from forge.stage1b_multi_view.view_counter import (
+        count_views,
+        detect_named_views,
+        group_duplicate_views,
+    )
+else:
+    from .depth_estimator import estimate_depth
+    from .feature_detector import detect_features
+    from .feature_matcher import match_features
+    from .pose_estimator import estimate_relative_poses
+    from .validate_geometry_brief import validate_geometry_brief
+    from .view_counter import count_views, detect_named_views, group_duplicate_views
 
 
 def synthesize_geometry_brief(
     image_paths: List[Path],
     output_path: Optional[Path] = None,
+    calibration: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Synthesize geometry brief from multiple reference images.
@@ -58,10 +74,13 @@ def synthesize_geometry_brief(
     match_results = match_features(all_features)
 
     # Step 5: Estimate relative poses
-    poses = estimate_relative_poses(match_results)
+    camera_matrix = calibration.get("cameraMatrix") if calibration else None
+    focal_length_px = calibration.get("focalLengthPx") if calibration else None
+    baseline_units = calibration.get("baselineUnits") if calibration else None
+    poses = estimate_relative_poses(match_results, camera_matrix)
 
     # Step 6: Estimate depth from parallax
-    depth_data = estimate_depth(match_results, poses)
+    depth_data = estimate_depth(match_results, poses, focal_length_px, baseline_units)
 
     # Step 7: Generate geometry brief
     brief = _generate_geometry_brief(
@@ -74,6 +93,9 @@ def synthesize_geometry_brief(
         poses=poses,
         depth=depth_data,
     )
+    validation_errors = validate_geometry_brief(brief)
+    if validation_errors:
+        raise ValueError("Invalid geometry brief: " + "; ".join(validation_errors))
 
     # Step 8: Save if output path provided
     if output_path:
@@ -136,10 +158,9 @@ def _generate_geometry_brief(
         + 0.15 * pose_confidence
         + 0.10 * depth_confidence
     )
-    # No calibrated depth or component reconstruction is emitted yet. Cap the
-    # result so downstream stages cannot mistake feature evidence for a
-    # metric geometry solution.
-    confidence = min(0.49, evidence_confidence)
+    calibrated_components = _calibrated_components(depth, grouped_views)
+    complete = bool(calibrated_components)
+    confidence = min(0.95, evidence_confidence) if complete else min(0.49, evidence_confidence)
 
     return {
         "viewCount": view_count,
@@ -147,7 +168,7 @@ def _generate_geometry_brief(
         "duplicateViewCount": max(0, input_view_count - view_count),
         "synthesisMode": mode,
         "confidence": round(confidence, 4),
-        "status": "evidence-only",
+        "status": "complete" if complete else "evidence-only",
         "namedViews": {k: str(v) for k, v in named_views.items()},
         "featureCount": {k: v.feature_count for k, v in features.items()},
         "matchCount": sum(m.match_count for m in matches.values()) if matches else 0,
@@ -159,12 +180,45 @@ def _generate_geometry_brief(
             "depthConfidence": round(depth_confidence, 4),
             "calibratedDepthAvailable": bool(depth.point_cloud),
         },
-        "components": {},
+        "components": calibrated_components,
         "notes": (
             f"Multi-view evidence extraction with {view_count} unique views. "
-            "No metric component geometry has been synthesized."
+            "Metric envelope is available only when calibrated depth succeeds."
         ),
     }
+
+
+def _calibrated_components(depth: Any, grouped_views: Dict[str, Path]) -> Dict[str, Any]:
+    if not depth.point_cloud:
+        return {}
+    x_values = sorted(point.x for point in depth.point_cloud)
+    y_values = sorted(point.y for point in depth.point_cloud)
+    z_values = sorted(point.z for point in depth.point_cloud)
+    dimensions = {
+        "width": _robust_span(x_values),
+        "height": _robust_span(y_values),
+        "depth": _robust_span(z_values),
+    }
+    if not all(value > 0.0 for value in dimensions.values()):
+        return {}
+    confidence = round(min(0.95, depth.confidence), 4)
+    return {
+        "root": {
+            "visibleIn": list(grouped_views),
+            "dimensions": dimensions,
+            "curvature": {"profile": "depth-envelope", "confidence": confidence},
+            "confidence": confidence,
+            "notes": "Calibrated point-cloud envelope; refine semantic component boundaries separately.",
+        }
+    }
+
+
+def _robust_span(values: List[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    lower_index = max(0, int(len(values) * 0.05))
+    upper_index = min(len(values) - 1, int(len(values) * 0.95))
+    return round(values[upper_index] - values[lower_index], 6)
 
 
 def main():
@@ -188,6 +242,11 @@ def main():
         action="store_true",
         help="Enable verbose output"
     )
+    parser.add_argument(
+        "--calibration",
+        type=Path,
+        help="JSON object with cameraMatrix, focalLengthPx, and baselineUnits for metric depth.",
+    )
 
     args = parser.parse_args()
 
@@ -200,9 +259,20 @@ def main():
             print(f"Error: Image not found: {path}", file=sys.stderr)
             sys.exit(1)
 
+    calibration = None
+    if args.calibration:
+        try:
+            calibration = json.loads(args.calibration.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"Error reading calibration: {error}", file=sys.stderr)
+            return 1
+        if not isinstance(calibration, dict):
+            print("Error: calibration must be a JSON object", file=sys.stderr)
+            return 1
+
     # Run synthesis
     try:
-        brief = synthesize_geometry_brief(image_paths, args.output)
+        brief = synthesize_geometry_brief(image_paths, args.output, calibration)
         if args.verbose:
             print(json.dumps(brief, indent=2))
         else:

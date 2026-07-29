@@ -2,7 +2,11 @@
 
 ## Overview
 
-This protocol defines how to analyze multiple reference images and synthesize 3D geometry information. It supports variable view counts (1 to N views) with adaptive processing.
+This protocol defines how to analyze multiple reference images and preserve evidence for procedural 3D authoring. It supports variable view counts (1 to N views) with adaptive processing.
+
+## Current Bounded Behavior
+
+`forge/stage1b_multi_view/synthesize.py` is deliberately fail-closed. With ordinary uncalibrated photos it returns an `evidence-only` brief, not metric component dimensions or an automatic mesh. With verified `cameraMatrix`, `focalLengthPx`, and `baselineUnits`, it can emit a bounded calibrated depth envelope. `new_pre_spec_assessment.py` accepts repeatable `--image` arguments, stores every path in `sourceImages`, and carries the brief through `new_sculpt_spec.py`. Do not describe uncalibrated evidence extraction as photogrammetry.
 
 ## When To Use
 
@@ -17,14 +21,12 @@ Use this protocol when:
 ### Step 1: View Inventory
 
 1. **Count views**: Determine how many images are provided
-2. **Identify views**: Detect named views (front, back, top, etc.) or auto-detect angles
-3. **Group duplicates**: If multiple angles of same view exist, group them
-4. **Determine mode**: Based on view count, select synthesis mode:
-   - 1 view: Skip synthesis, use code-written geometry
-   - 2 views: Basic synthesis
-   - 3-4 views: Standard synthesis
-   - 5-6 views: Full synthesis
-   - 7+ views: Optimal synthesis
+2. **Identify views**: Detect named views (front, back, top, etc.) first. For readable unnamed PNGs, group simple luminance signatures into `auto-*` view clusters; those labels are not semantic front/back claims.
+3. **Group duplicates**: If multiple angles of same view exist, group them and retain the higher-quality file
+4. **Determine evidence coverage**: Preserve every distinct view and record what each reveals.
+   - 1 view: skip synthesis and mark hidden surfaces as unknown
+   - 2+ views: run evidence-only synthesis and keep named/duplicate view provenance
+   - calibrated capture: only then promote pose/depth estimates into dimensions
 
 ### Step 2: Feature Detection
 
@@ -47,15 +49,15 @@ For each view:
 
 ### Step 5: Depth Estimation
 
-1. **Triangulate points**: Compute 3D positions from matched features
-2. **Generate depth maps**: Create depth information for each view
-3. **Merge point clouds**: Combine depth data into unified 3D representation
+1. **Check calibration first**: require known intrinsics/baseline or an explicit calibrated solver result
+2. **Triangulate points only when calibrated**: otherwise retain match evidence without depth claims
+3. **Keep confidence bounded**: uncalibrated cues cannot become metric dimensions
 
 ### Step 6: Geometry Synthesis
 
-1. **Extract dimensions**: Determine component sizes from 3D data
-2. **Estimate curvature**: Compute surface curvature from point clouds
-3. **Generate brief**: Create geometry brief with per-component confidence
+1. **Extract dimensions only from calibrated 3D data or agent-authored measurements**
+2. **Attach curvature only when its evidence is explicit**
+3. **Generate an evidence brief**: include per-component confidence and unknowns
 
 ## Output Format
 
@@ -65,7 +67,8 @@ The protocol produces a geometry brief with:
 {
   "viewCount": 6,
   "synthesisMode": "full",
-  "confidence": 0.85,
+  "confidence": 0.49,
+  "status": "evidence-only",
   "namedViews": {
     "front": "path/to/front.png",
     "back": "path/to/back.png"
@@ -110,7 +113,7 @@ Before proceeding to spec generation:
 - [ ] Features detected in all views
 - [ ] Matches found between view pairs
 - [ ] Poses estimated with reasonable accuracy
-- [ ] Depth data generated
+- [ ] Depth data generated only when calibration is present
 - [ ] Geometry brief created with confidence scores
 
 ## Integration Points
@@ -134,6 +137,7 @@ Before proceeding to spec generation:
 - Compare against all provided views
 - Aggregate scores across views
 - Report per-view breakdown
+- For the PS5 iteration target, record baseline and multi-view review artifacts in a release-evidence JSON and validate it with `validate_release_evidence.py`; do not claim the target from synthetic tests.
 
 ## References
 

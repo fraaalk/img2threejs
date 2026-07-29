@@ -210,15 +210,17 @@ def vector(values: Any, fallback: list[float]) -> str:
 
 
 def scale_vector(component: dict[str, Any], transform: dict[str, Any]) -> str:
-    if "scale" in transform:
-        return vector(transform.get("scale"), [1, 1, 1])
-    dimensions = component.get("dimensions")
+    dimensions = component.get("multiViewDimensions")
+    if not isinstance(dimensions, dict):
+        dimensions = component.get("dimensions")
     if isinstance(dimensions, dict):
         width = dimensions.get("width", dimensions.get("radius", 0.5) * 2 if isinstance(dimensions.get("radius"), (int, float)) else 1)
         height = dimensions.get("height", dimensions.get("length", 1))
         depth = dimensions.get("depth", dimensions.get("radius", 0.5) * 2 if isinstance(dimensions.get("radius"), (int, float)) else 1)
         if all(isinstance(item, (int, float)) for item in (width, height, depth)):
             return vector([width, height, depth], [1, 1, 1])
+    if "scale" in transform:
+        return vector(transform.get("scale"), [1, 1, 1])
     return vector(None, [1, 1, 1])
 
 
@@ -255,6 +257,9 @@ _DEFAULT_CURVE_SWEEP = {
 
 
 def geometry_for(primitive: str, component: dict[str, Any] | None = None) -> str:
+    curvature = component.get("multiViewCurvature") if isinstance(component, dict) else None
+    if isinstance(curvature, dict) and curvature.get("profile") == "ellipsoid":
+        return "new THREE.SphereGeometry(0.5, 64, 40)"
     if primitive == "box":
         return "new THREE.BoxGeometry(1, 1, 1, 12, 12, 12)"
     if primitive in {"sphere", "ellipsoid"}:
@@ -312,6 +317,9 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "route": spec.get("route"),
         "exactnessTier": spec.get("exactnessTier"),
         "referenceCamera": spec.get("referenceCamera"),
+        "sourceImages": spec.get("sourceImages", []),
+        "multiViewSynthesis": spec.get("multiViewSynthesis"),
+        "multiViewBrief": spec.get("multiViewBrief"),
         "approximationNotes": spec.get("approximationNotes", []),
     }
     materials = {

@@ -92,6 +92,14 @@ def estimate_depth(
             )
         depth_maps[point.view_name].points.append(point)
 
+    for depth_map in depth_maps.values():
+        point_confidences = [point.confidence for point in depth_map.points]
+        depth_map.confidence = (
+            sum(point_confidences) / len(point_confidences)
+            if point_confidences
+            else 0.0
+        )
+
     # Calculate confidence
     confidence = _calculate_depth_confidence(depth_maps)
 

@@ -21,6 +21,7 @@ import logging
 from copy import deepcopy
 
 from .synthesize import synthesize_geometry_brief
+from .hybrid_synthesis import hybrid_synthesis
 from .view_counter import count_views
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ def run_synthesis_for_intake(
     image_paths: List[Path],
     item_name: str,
     output_dir: Optional[Path] = None,
+    agent_analysis: Optional[Dict[str, Any]] = None,
+    calibration: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run multi-view synthesis during intake process.
@@ -67,7 +70,13 @@ def run_synthesis_for_intake(
             output_path = output_dir / f"{safe_name}_geometry_brief.json"
 
         # Run synthesis
-        brief = synthesize_geometry_brief(image_paths, output_path)
+        brief = (
+            hybrid_synthesis(image_paths, agent_analysis, calibration)
+            if agent_analysis is not None
+            else synthesize_geometry_brief(image_paths, calibration=calibration)
+        )
+        if output_path:
+            output_path.write_text(json.dumps(brief, indent=2), encoding="utf-8")
 
         result = {
             "status": brief.get("status", "evidence-only"),

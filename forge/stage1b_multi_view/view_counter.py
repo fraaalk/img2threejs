@@ -57,16 +57,72 @@ def detect_named_views(image_paths: List[Path]) -> Dict[str, Path]:
     """
     named_views = {}
     name_counts: Dict[str, int] = {}
+    auto_labels = _auto_labels_for_unnamed_views(image_paths)
 
     for path in image_paths:
         filename = path.stem.lower()
-        base_name = _extract_view_name(filename) or filename
+        base_name = _extract_view_name(filename) or auto_labels.get(path) or filename
         occurrence = name_counts.get(base_name, 0) + 1
         name_counts[base_name] = occurrence
         view_name = base_name if occurrence == 1 else f"{base_name}-{occurrence}"
         named_views[view_name] = path
 
     return named_views
+
+
+def cluster_unnamed_views(image_paths: List[Path]) -> Dict[str, List[Path]]:
+    clusters: Dict[str, List[Path]] = {}
+    representatives: Dict[str, tuple[float, ...]] = {}
+    for path in image_paths:
+        filename = path.stem.lower()
+        if _extract_view_name(filename) is not None or _extract_angle_from_filename(filename) is not None:
+            continue
+        signature = _image_signature(path)
+        if signature is None:
+            continue
+        matching_cluster = next(
+            (
+                name
+                for name, representative in representatives.items()
+                if _signature_distance(signature, representative) <= 12.0
+            ),
+            None,
+        )
+        if matching_cluster is None:
+            matching_cluster = f"auto-{len(clusters) + 1}"
+            clusters[matching_cluster] = []
+            representatives[matching_cluster] = signature
+        clusters[matching_cluster].append(path)
+    return clusters
+
+
+def _auto_labels_for_unnamed_views(image_paths: List[Path]) -> Dict[Path, str]:
+    labels: Dict[Path, str] = {}
+    for cluster_name, paths in cluster_unnamed_views(image_paths).items():
+        for path in paths:
+            labels[path] = cluster_name
+    return labels
+
+
+def _image_signature(path: Path) -> Optional[tuple[float, ...]]:
+    try:
+        from forge.stage4_review.make_comparison_sheet import read_png
+
+        width, height, pixels = read_png(path)
+    except (OSError, ValueError):
+        return None
+    samples: list[float] = []
+    for row in range(4):
+        for column in range(4):
+            x = min(width - 1, int((column + 0.5) * width / 4))
+            y = min(height - 1, int((row + 0.5) * height / 4))
+            red, green, blue, _alpha = pixels[y * width + x]
+            samples.append((299 * red + 587 * green + 114 * blue) / 1000)
+    return tuple(samples)
+
+
+def _signature_distance(first: tuple[float, ...], second: tuple[float, ...]) -> float:
+    return sum(abs(a - b) for a, b in zip(first, second)) / len(first)
 
 
 def group_duplicate_views(
@@ -89,11 +145,19 @@ def group_duplicate_views(
     for view_name, path in named_views.items():
         base_name = _get_base_view_name(view_name)
         if base_name in grouped:
-            # Keep the first one (could be enhanced to select best quality)
-            continue
+            if _image_quality(path) <= _image_quality(grouped[base_name]):
+                continue
         grouped[base_name] = path
 
     return grouped
+
+
+def _image_quality(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (0, 0)
+    return (stat.st_size, stat.st_mtime_ns)
 
 
 def detect_view_angles(

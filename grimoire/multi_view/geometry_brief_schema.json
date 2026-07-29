@@ -96,8 +96,17 @@
           "description": "Component dimensions"
         },
         "curvature": {
-          "type": "string",
-          "description": "Description of surface curvature"
+          "oneOf": [
+            {"type": "string"},
+            {
+              "type": "object",
+              "properties": {
+                "profile": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+              }
+            }
+          ],
+          "description": "Measured or agent-authored surface curvature evidence"
         },
         "confidence": {
           "type": "number",
@@ -116,28 +125,33 @@
       "properties": {
         "width": {
           "type": "number",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "description": "Width in mm"
         },
         "height": {
           "type": "number",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "description": "Height in mm"
         },
         "depth": {
           "type": "number",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "description": "Depth in mm"
         },
         "diameter": {
           "type": "number",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "description": "Diameter in mm (for cylindrical objects)"
         },
         "radius": {
           "type": "number",
-          "minimum": 0,
+          "exclusiveMinimum": 0,
           "description": "Radius in mm (for circular objects)"
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Length in mm"
         }
       }
     }

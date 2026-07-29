@@ -33,6 +33,7 @@ class PoseEstimationResult:
 
 def estimate_relative_poses(
     match_results: Dict[Tuple[str, str], MatchResult],
+    camera_matrix: Optional[List[List[float]]] = None,
 ) -> PoseEstimationResult:
     """
     Estimate relative poses between all view pairs.
@@ -52,7 +53,7 @@ def estimate_relative_poses(
             # Need at least 4 matches for pose estimation
             continue
 
-        relative_pose = estimate_pair_pose(match_result)
+        relative_pose = estimate_pair_pose(match_result, camera_matrix)
         if relative_pose:
             relative_poses[(view1, view2)] = relative_pose
 
@@ -70,7 +71,10 @@ def estimate_relative_poses(
     )
 
 
-def estimate_pair_pose(match_result: MatchResult) -> Optional[CameraPose]:
+def estimate_pair_pose(
+    match_result: MatchResult,
+    camera_matrix: Optional[List[List[float]]] = None,
+) -> Optional[CameraPose]:
     """
     Estimate relative pose between two views.
 
@@ -83,9 +87,14 @@ def estimate_pair_pose(match_result: MatchResult) -> Optional[CameraPose]:
     if match_result.match_count < 4:
         return None
 
-    # Image correspondences alone do not provide a metric camera pose without
-    # intrinsics. Keep this explicitly heuristic instead of treating a
-    # fundamental matrix as an essential matrix.
+    if camera_matrix is not None:
+        try:
+            calibrated_pose = _estimate_pose_opencv(match_result, camera_matrix)
+        except ImportError:
+            calibrated_pose = None
+        if calibrated_pose is not None:
+            return calibrated_pose
+
     return _estimate_pose_simple(match_result)
 
 

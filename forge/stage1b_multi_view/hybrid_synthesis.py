@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 def hybrid_synthesis(
     image_paths: List[Path],
     agent_analysis: Optional[Dict[str, Any]] = None,
+    calibration: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run hybrid synthesis combining deterministic and agent-driven analysis.
@@ -30,8 +31,12 @@ def hybrid_synthesis(
     """
     view_count = count_views(image_paths)
 
-    # Run deterministic synthesis
-    deterministic_result = synthesize_geometry_brief(image_paths)
+    try:
+        deterministic_result = synthesize_geometry_brief(image_paths, calibration=calibration)
+    except (OSError, RuntimeError, ValueError) as error:
+        if agent_analysis is None:
+            raise
+        deterministic_result = _fallback_evidence_result(view_count, str(error))
 
     # If no agent analysis provided, return deterministic result
     if agent_analysis is None:
@@ -65,22 +70,97 @@ def combine_results(
 
     # Weighted average (deterministic 0.6, agent 0.4)
     combined_confidence = (det_confidence * 0.6) + (agent_confidence * 0.4)
-    combined["confidence"] = combined_confidence
 
     # Merge components
     if "components" in agent:
+        conflicts = find_component_conflicts(
+            deterministic.get("components", {}),
+            agent.get("components", {}),
+        )
         combined["components"] = merge_components(
             deterministic.get("components", {}),
             agent.get("components", {}),
         )
+        if conflicts:
+            combined["conflicts"] = conflicts
 
     # Add agent notes
     if "notes" in agent:
         combined["agentNotes"] = agent["notes"]
 
     combined["synthesisMode"] = "hybrid"
+    has_components = bool(combined.get("components"))
+    calibrated_depth = deterministic.get("evidence", {}).get("calibratedDepthAvailable") is True
+    combined["status"] = "complete" if calibrated_depth and has_components else "evidence-only"
+    combined["confidence"] = (
+        combined_confidence if calibrated_depth else min(0.49, combined_confidence)
+    )
+    combined["calibrated"] = calibrated_depth
+    combined["agentCalibrationClaim"] = agent.get("calibrated") is True
 
     return combined
+
+
+def find_component_conflicts(
+    deterministic_components: Dict[str, Any],
+    agent_components: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    conflicts: List[Dict[str, Any]] = []
+    for component_id, deterministic_component in deterministic_components.items():
+        agent_component = agent_components.get(component_id)
+        if not isinstance(deterministic_component, dict) or not isinstance(agent_component, dict):
+            continue
+        deterministic_dimensions = deterministic_component.get("dimensions")
+        agent_dimensions = agent_component.get("dimensions")
+        if not isinstance(deterministic_dimensions, dict) or not isinstance(agent_dimensions, dict):
+            continue
+        for dimension, deterministic_value in deterministic_dimensions.items():
+            agent_value = agent_dimensions.get(dimension)
+            if not _dimension_values_conflict(deterministic_value, agent_value):
+                continue
+            conflicts.append(
+                {
+                    "component": component_id,
+                    "dimension": dimension,
+                    "deterministic": deterministic_value,
+                    "agent": agent_value,
+                    "action": "resolve-with-capture-evidence",
+                }
+            )
+    return conflicts
+
+
+def _dimension_values_conflict(deterministic_value: Any, agent_value: Any) -> bool:
+    if isinstance(deterministic_value, bool) or isinstance(agent_value, bool):
+        return False
+    if not isinstance(deterministic_value, (int, float)):
+        return False
+    if not isinstance(agent_value, (int, float)):
+        return False
+    reference = max(abs(float(deterministic_value)), 1e-6)
+    return abs(float(deterministic_value) - float(agent_value)) / reference > 0.1
+
+
+def _fallback_evidence_result(view_count: int, failure: str) -> Dict[str, Any]:
+    return {
+        "viewCount": view_count,
+        "inputViewCount": view_count,
+        "duplicateViewCount": 0,
+        "synthesisMode": "hybrid",
+        "status": "evidence-only",
+        "confidence": 0.0,
+        "components": {},
+        "evidence": {
+            "featureCoverage": 0.0,
+            "matchCoverage": 0.0,
+            "matchConfidence": 0.0,
+            "poseConfidence": 0.0,
+            "depthConfidence": 0.0,
+            "calibratedDepthAvailable": False,
+        },
+        "deterministicFailure": failure,
+        "notes": "Deterministic synthesis failed; retaining agent evidence for review.",
+    }
 
 
 def merge_components(
