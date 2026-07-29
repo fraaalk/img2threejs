@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
 import logging
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -26,21 +27,21 @@ def enhance_spec_with_brief(
     Returns:
         Enhanced spec with brief data
     """
-    # Add multiViewBrief field to spec
-    spec["multiViewBrief"] = {
+    enhanced_spec = deepcopy(spec)
+    enhanced_spec["multiViewBrief"] = {
         "viewCount": brief.get("viewCount", 0),
         "synthesisMode": brief.get("synthesisMode", "unknown"),
         "confidence": brief.get("confidence", 0.0),
     }
 
     # Enhance components with brief data
-    if "components" in brief and "components" in spec:
-        spec["components"] = enhance_components_with_brief(
-            spec["components"],
+    if "components" in brief and "components" in enhanced_spec:
+        enhanced_spec["components"] = enhance_components_with_brief(
+            enhanced_spec["components"],
             brief["components"],
         )
 
-    return spec
+    return enhanced_spec
 
 
 def enhance_components_with_brief(
@@ -57,7 +58,7 @@ def enhance_components_with_brief(
     Returns:
         Enhanced components
     """
-    enhanced = spec_components.copy()
+    enhanced = deepcopy(spec_components)
 
     for component_name, brief_data in brief_components.items():
         if component_name in enhanced:

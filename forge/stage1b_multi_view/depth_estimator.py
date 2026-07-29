@@ -43,6 +43,8 @@ class DepthEstimationResult:
 def estimate_depth(
     match_results: Dict[Tuple[str, str], MatchResult],
     pose_estimation: PoseEstimationResult,
+    focal_length_px: Optional[float] = None,
+    baseline_units: Optional[float] = None,
 ) -> DepthEstimationResult:
     """
     Estimate depth from matched features and poses.
@@ -64,11 +66,18 @@ def estimate_depth(
 
         # Get relative pose
         relative_pose = pose_estimation.relative_poses.get((view1, view2))
-        if not relative_pose:
+        if not relative_pose or not relative_pose.calibrated:
+            continue
+        if focal_length_px is None or baseline_units is None:
             continue
 
         # Estimate depth for this pair
-        pair_depths = _estimate_pair_depth(match_result, relative_pose)
+        pair_depths = _estimate_pair_depth(
+            match_result,
+            relative_pose,
+            focal_length_px,
+            baseline_units,
+        )
         point_cloud.extend(pair_depths)
 
     # Group depth points by view
@@ -96,6 +105,8 @@ def estimate_depth(
 def _estimate_pair_depth(
     match_result: MatchResult,
     relative_pose: CameraPose,
+    focal_length_px: float,
+    baseline_units: float,
 ) -> List[DepthPoint]:
     """
     Estimate depth for a pair of matched features.
@@ -119,16 +130,13 @@ def _estimate_pair_depth(
             # No disparity, can't estimate depth
             continue
 
-        # Simple depth estimation: depth ~ focal_length * baseline / disparity
-        # Using arbitrary focal length and baseline for now
-        focal_length = 1000.0
-        baseline = 0.1  # 10cm baseline
-
-        depth = (focal_length * baseline) / abs(disparity)
+        # This rectified-stereo fallback is only allowed when callers provide
+        # calibration. It must not invent focal length or baseline.
+        depth = (focal_length_px * baseline_units) / abs(disparity)
 
         # Convert to 3D point
-        x = match.feature1.x * depth / focal_length
-        y = match.feature1.y * depth / focal_length
+        x = match.feature1.x * depth / focal_length_px
+        y = match.feature1.y * depth / focal_length_px
         z = depth
 
         point = DepthPoint(

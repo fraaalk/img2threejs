@@ -185,50 +185,40 @@ def _detect_edge_features(image_path: Path, max_features: int) -> FeatureSet:
     Returns:
         FeatureSet with edge features
     """
-    try:
-        from PIL import Image, ImageFilter
-        import numpy as np
+    from forge.stage4_review.make_comparison_sheet import read_png
 
-        # Load image
-        img = Image.open(image_path).convert("L")
+    width, height, pixels = read_png(image_path)
+    luminance = [
+        (299 * red + 587 * green + 114 * blue) // 1000
+        for red, green, blue, _alpha in pixels
+    ]
+    candidates = []
+    for y in range(1, height - 1):
+        row = y * width
+        for x in range(1, width - 1):
+            index = row + x
+            gradient_x = abs(luminance[index + 1] - luminance[index - 1])
+            gradient_y = abs(luminance[index + width] - luminance[index - width])
+            strength = gradient_x + gradient_y
+            if strength >= 48:
+                candidates.append((strength, x, y))
 
-        # Apply edge detection
-        edges = img.filter(ImageFilter.FIND_EDGES)
+    # Keep the strongest points while distributing the final sample across the
+    # sorted candidate set. Pure stdlib, deterministic, and bounded.
+    candidates.sort(reverse=True)
+    strongest = candidates[: max(max_features * 4, max_features)]
+    strongest.sort(key=lambda item: (item[2], item[1]))
+    if len(strongest) > max_features:
+        step = len(strongest) / max_features
+        strongest = [strongest[int(index * step)] for index in range(max_features)]
 
-        # Convert to numpy array
-        edge_array = np.array(edges)
-
-        # Find edge points (pixels with high edge strength)
-        threshold = np.percentile(edge_array, 90)  # Top 10% strongest edges
-        edge_points = np.where(edge_array > threshold)
-
-        # Sample features from edge points
-        features = []
-        if len(edge_points[0]) > 0:
-            # Sample evenly across edge points
-            indices = np.linspace(0, len(edge_points[0]) - 1, min(max_features, len(edge_points[0])), dtype=int)
-            for i in indices:
-                y, x = edge_points[0][i], edge_points[1][i]
-                strength = float(edge_array[y, x]) / 255.0
-                feature = Feature(
-                    x=float(x),
-                    y=float(y),
-                    strength=strength,
-                )
-                features.append(feature)
-
-        return FeatureSet(
-            features=features,
-            image_path=image_path,
-            feature_count=len(features),
-            detection_method="edge",
-        )
-
-    except ImportError:
-        # If PIL not available, return empty feature set
-        return FeatureSet(
-            features=[],
-            image_path=image_path,
-            feature_count=0,
-            detection_method="none",
-        )
+    features = [
+        Feature(x=float(x), y=float(y), strength=min(1.0, strength / 510.0))
+        for strength, x, y in strongest
+    ]
+    return FeatureSet(
+        features=features,
+        image_path=image_path,
+        feature_count=len(features),
+        detection_method="edge",
+    )

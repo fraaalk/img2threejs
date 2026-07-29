@@ -19,6 +19,8 @@ class CameraPose:
     translation: Tuple[float, float, float]
     confidence: float
     view_name: str
+    calibrated: bool = False
+    method: str = "heuristic"
 
 
 @dataclass
@@ -81,15 +83,16 @@ def estimate_pair_pose(match_result: MatchResult) -> Optional[CameraPose]:
     if match_result.match_count < 4:
         return None
 
-    # Try to use OpenCV for pose estimation if available
-    try:
-        return _estimate_pose_opencv(match_result)
-    except ImportError:
-        # Fallback to simple estimation
-        return _estimate_pose_simple(match_result)
+    # Image correspondences alone do not provide a metric camera pose without
+    # intrinsics. Keep this explicitly heuristic instead of treating a
+    # fundamental matrix as an essential matrix.
+    return _estimate_pose_simple(match_result)
 
 
-def _estimate_pose_opencv(match_result: MatchResult) -> Optional[CameraPose]:
+def _estimate_pose_opencv(
+    match_result: MatchResult,
+    camera_matrix,
+) -> Optional[CameraPose]:
     """
     Estimate pose using OpenCV.
 
@@ -117,12 +120,21 @@ def _estimate_pose_opencv(match_result: MatchResult) -> Optional[CameraPose]:
     if F is None:
         return None
 
-    # Compute essential matrix (assuming calibrated camera)
-    # For uncalibrated, we can only get epipolar geometry
-    E = F  # Simplified - in practice would use camera intrinsics
+    # Convert the pixel-coordinate fundamental matrix into an essential
+    # matrix. This path is intentionally unavailable without intrinsics.
+    K = np.asarray(camera_matrix, dtype=np.float64)
+    if K.shape != (3, 3):
+        raise ValueError("camera_matrix must be a 3x3 intrinsic matrix")
+    E = K.T @ F @ K
 
     # Decompose essential matrix
-    _, R, t, _ = cv2.recoverPose(E, points1, points2)
+    inliers = mask.ravel().astype(bool) if mask is not None else None
+    if inliers is not None:
+        points1 = points1[inliers]
+        points2 = points2[inliers]
+    if len(points1) < 5:
+        return None
+    _, R, t, _ = cv2.recoverPose(E, points1, points2, K)
 
     # Convert rotation matrix to euler angles
     roll, pitch, yaw = _rotation_matrix_to_euler(R)
@@ -132,6 +144,8 @@ def _estimate_pose_opencv(match_result: MatchResult) -> Optional[CameraPose]:
         translation=(float(t[0]), float(t[1]), float(t[2])),
         confidence=match_result.confidence,
         view_name=match_result.view2,
+        calibrated=True,
+        method="essential-matrix",
     )
 
 
@@ -166,8 +180,10 @@ def _estimate_pose_simple(match_result: MatchResult) -> Optional[CameraPose]:
     return CameraPose(
         rotation=(0.0, pitch, yaw),
         translation=(dx / 1000.0, dy / 1000.0, 0.0),
-        confidence=match_result.confidence * 0.5,  # Lower confidence for simple method
+        confidence=min(0.2, match_result.confidence * 0.2),
         view_name=match_result.view2,
+        calibrated=False,
+        method="image-displacement-heuristic",
     )
 
 
@@ -193,6 +209,8 @@ def _calculate_absolute_poses(
             translation=(0.0, 0.0, 0.0),
             confidence=1.0,
             view_name=first_pair[0],
+            calibrated=True,
+            method="identity-reference",
         )
 
     # Add relative poses
@@ -203,6 +221,8 @@ def _calculate_absolute_poses(
                 translation=pose.translation,
                 confidence=pose.confidence,
                 view_name=view2,
+                calibrated=pose.calibrated,
+                method=pose.method,
             )
 
     return poses

@@ -9,6 +9,8 @@ from pathlib import Path
 import json
 import logging
 
+from forge.stage4_review.divine_eye import evaluate as evaluate_divine_eye
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,25 +87,46 @@ def compare_multi_view(
         "viewCount": len(reference_paths),
         "perViewResults": {},
         "aggregatedScore": 0.0,
+        "complete": False,
+        "passed": False,
+        "missingViews": [],
+        "failedViews": [],
+        "worstView": None,
+        "worstScore": 0.0,
     }
-
-    scores = []
 
     for view_name, reference_path in reference_paths.items():
         if view_name in render_paths:
             render_path = render_paths[view_name]
             view_result = compare_single_view(render_path, reference_path)
             results["perViewResults"][view_name] = view_result
-            scores.append(view_result.get("score", 0.0))
         else:
             results["perViewResults"][view_name] = {
                 "status": "missing",
                 "score": 0.0,
             }
+            results["missingViews"].append(view_name)
 
-    # Calculate aggregated score
-    if scores:
-        results["aggregatedScore"] = sum(scores) / len(scores)
+    results["complete"] = not results["missingViews"] and all(
+        result.get("status") == "compared"
+        for result in results["perViewResults"].values()
+    )
+    results["failedViews"] = [
+        view_name
+        for view_name, result in results["perViewResults"].items()
+        if result.get("status") != "compared" or result.get("verdict") != "pass"
+    ]
+    results["passed"] = results["complete"] and not results["failedViews"]
+    results["aggregatedScore"] = aggregate_multi_view_scores(
+        results["perViewResults"]
+    )
+    if results["perViewResults"]:
+        worst_view, worst_result = min(
+            results["perViewResults"].items(),
+            key=lambda item: item[1].get("score", 0.0),
+        )
+        results["worstView"] = worst_view
+        results["worstScore"] = worst_result.get("score", 0.0)
 
     return results
 
@@ -122,15 +145,37 @@ def compare_single_view(
     Returns:
         Single view comparison result
     """
-    # Placeholder for actual comparison logic
-    # In practice, would use image comparison algorithms
+    if not render_path.is_file() or not reference_path.is_file():
+        return {
+            "status": "missing",
+            "renderPath": str(render_path),
+            "referencePath": str(reference_path),
+            "score": 0.0,
+        }
+
+    try:
+        evaluation = evaluate_divine_eye(reference_path, render_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Multi-view comparison failed: %s", exc)
+        return {
+            "status": "error",
+            "renderPath": str(render_path),
+            "referencePath": str(reference_path),
+            "score": 0.0,
+            "error": str(exc),
+        }
+
+    signals = evaluation.get("signals", {})
     return {
         "status": "compared",
         "renderPath": str(render_path),
         "referencePath": str(reference_path),
-        "score": 0.5,  # Placeholder score
-        "silhouetteIoU": 0.5,  # Placeholder
-        "proportionDelta": 0.5,  # Placeholder
+        "score": evaluation.get("fidelity", 0.0),
+        "verdict": evaluation.get("verdict", "unknown"),
+        "action": evaluation.get("action", "probe"),
+        "silhouetteIoU": signals.get("silhouetteIoU", 0.0),
+        "proportionDelta": signals.get("aspectRatioDelta", 1.0),
+        "hardGateFailures": evaluation.get("hardGateFailures", []),
     }
 
 
@@ -151,26 +196,19 @@ def aggregate_multi_view_scores(
     if not per_view_results:
         return 0.0
 
-    # Default weights (primary view has higher weight)
+    # Equal weighting is the safe default. Primary-view policy belongs to the
+    # caller because projects use names such as "front-primary".
     if weights is None:
-        weights = {}
-        for view_name in per_view_results:
-            if view_name == "front":
-                weights[view_name] = 2.0
-            elif view_name in ["back", "top", "bottom"]:
-                weights[view_name] = 1.5
-            else:
-                weights[view_name] = 1.0
+        weights = {view_name: 1.0 for view_name in per_view_results}
 
     total_weight = 0.0
     weighted_score = 0.0
 
     for view_name, result in per_view_results.items():
-        if result.get("status") == "compared":
-            weight = weights.get(view_name, 1.0)
-            score = result.get("score", 0.0)
-            weighted_score += score * weight
-            total_weight += weight
+        weight = weights.get(view_name, 1.0)
+        score = result.get("score", 0.0)
+        weighted_score += score * weight
+        total_weight += weight
 
     if total_weight < 1e-6:
         return 0.0

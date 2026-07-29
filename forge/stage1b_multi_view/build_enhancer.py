@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import json
 import logging
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,8 @@ def enhance_build_with_brief(
     Returns:
         Enhanced build configuration with brief data
     """
-    # Add multiViewBrief field to build config
-    build_config["multiViewBrief"] = {
+    enhanced_config = deepcopy(build_config)
+    enhanced_config["multiViewBrief"] = {
         "viewCount": brief.get("viewCount", 0),
         "synthesisMode": brief.get("synthesisMode", "unknown"),
         "confidence": brief.get("confidence", 0.0),
@@ -35,12 +36,12 @@ def enhance_build_with_brief(
 
     # Enhance components with brief data
     if "components" in brief:
-        build_config["components"] = enhance_build_components(
-            build_config.get("components", {}),
+        enhanced_config["components"] = enhance_build_components(
+            enhanced_config.get("components", {}),
             brief["components"],
         )
 
-    return build_config
+    return enhanced_config
 
 
 def enhance_build_components(
@@ -57,7 +58,7 @@ def enhance_build_components(
     Returns:
         Enhanced components
     """
-    enhanced = build_components.copy()
+    enhanced = deepcopy(build_components)
 
     for component_name, brief_data in brief_components.items():
         if component_name in enhanced:

@@ -39,12 +39,13 @@ def synthesize_geometry_brief(
         Geometry brief dictionary with per-component dimensions and confidence
     """
     # Step 1: Count and analyze views
-    view_count = len(image_paths)
+    input_view_count = len(image_paths)
     named_views = detect_named_views(image_paths)
     grouped_views = group_duplicate_views(image_paths, named_views)
+    view_count = len(grouped_views)
 
     # Step 2: Handle single-view fallback
-    if view_count == 1:
+    if input_view_count == 1:
         return _generate_minimal_brief(image_paths[0])
 
     # Step 3: Detect features in each view
@@ -65,6 +66,7 @@ def synthesize_geometry_brief(
     # Step 7: Generate geometry brief
     brief = _generate_geometry_brief(
         view_count=view_count,
+        input_view_count=input_view_count,
         named_views=named_views,
         grouped_views=grouped_views,
         features=all_features,
@@ -95,6 +97,7 @@ def _generate_minimal_brief(image_path: Path) -> Dict[str, Any]:
 
 def _generate_geometry_brief(
     view_count: int,
+    input_view_count: int,
     named_views: Dict[str, Path],
     grouped_views: Dict[str, Path],
     features: Dict[str, List],
@@ -103,29 +106,64 @@ def _generate_geometry_brief(
     depth: Dict,
 ) -> Dict[str, Any]:
     """Generate comprehensive geometry brief from synthesis results."""
-    # Determine synthesis mode based on view count
+    # View count determines processing capacity, not confidence. Confidence
+    # must be earned by observable feature, match, pose and depth evidence.
     if view_count <= 2:
         mode = "basic"
-        base_confidence = 0.5
     elif view_count <= 4:
         mode = "standard"
-        base_confidence = 0.7
     elif view_count <= 6:
         mode = "full"
-        base_confidence = 0.85
     else:
         mode = "optimal"
-        base_confidence = 0.95
+    pair_count = max(1, len(matches))
+    matched_pairs = [match for match in matches.values() if match.match_count > 0]
+    feature_coverage = (
+        sum(1 for feature_set in features.values() if feature_set.feature_count > 0)
+        / max(1, len(grouped_views))
+    )
+    match_coverage = len(matched_pairs) / pair_count
+    match_confidence = (
+        sum(match.confidence for match in matched_pairs) / len(matched_pairs)
+        if matched_pairs else 0.0
+    )
+    pose_confidence = poses.confidence
+    depth_confidence = depth.confidence
+    evidence_confidence = (
+        0.20 * feature_coverage
+        + 0.30 * match_coverage
+        + 0.25 * match_confidence
+        + 0.15 * pose_confidence
+        + 0.10 * depth_confidence
+    )
+    # No calibrated depth or component reconstruction is emitted yet. Cap the
+    # result so downstream stages cannot mistake feature evidence for a
+    # metric geometry solution.
+    confidence = min(0.49, evidence_confidence)
 
     return {
         "viewCount": view_count,
+        "inputViewCount": input_view_count,
+        "duplicateViewCount": max(0, input_view_count - view_count),
         "synthesisMode": mode,
-        "confidence": base_confidence,
+        "confidence": round(confidence, 4),
+        "status": "evidence-only",
         "namedViews": {k: str(v) for k, v in named_views.items()},
         "featureCount": {k: v.feature_count for k, v in features.items()},
         "matchCount": sum(m.match_count for m in matches.values()) if matches else 0,
+        "evidence": {
+            "featureCoverage": round(feature_coverage, 4),
+            "matchCoverage": round(match_coverage, 4),
+            "matchConfidence": round(match_confidence, 4),
+            "poseConfidence": round(pose_confidence, 4),
+            "depthConfidence": round(depth_confidence, 4),
+            "calibratedDepthAvailable": bool(depth.point_cloud),
+        },
         "components": {},
-        "notes": f"Multi-view synthesis with {view_count} views"
+        "notes": (
+            f"Multi-view evidence extraction with {view_count} unique views. "
+            "No metric component geometry has been synthesized."
+        ),
     }
 
 

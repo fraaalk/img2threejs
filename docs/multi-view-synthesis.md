@@ -40,20 +40,25 @@ result = run_synthesis_for_intake(
     ],
     item_name="PS5 DualSense Controller",
 )
-# result["status"] == "complete"
+# result["status"] == "evidence-only"
 # result["synthesisMode"] == "full"
-# result["confidence"] == 0.85
+# confidence is derived from measured evidence and remains below 0.5 until
+# calibrated metric geometry/component reconstruction is available
 ```
 
 ## View Count Modes
 
-| Views | Mode | Confidence | Description |
-|-------|------|------------|-------------|
-| 1 | single-view | 0.3 | Skip synthesis, use code geometry |
-| 2 | basic | 0.5 | Basic cross-view matching |
-| 3-4 | standard | 0.7 | Good multi-view coverage |
-| 5-6 | full | 0.85 | Comprehensive synthesis |
-| 7+ | optimal | 0.95 | Multiple per angle, refinement |
+| Views | Mode | Description |
+|-------|------|-------------|
+| 1 | single-view | Skip synthesis, use code geometry |
+| 2 | basic | Basic cross-view evidence extraction |
+| 3-4 | standard | Broader cross-view evidence extraction |
+| 5-6 | full | Comprehensive evidence coverage |
+| 7+ | optimal | Multiple observations per angle |
+
+Mode describes available coverage only. Confidence is calculated from feature
+coverage, match coverage/quality, pose evidence and calibrated depth evidence;
+it is never assigned from image count alone.
 
 ## Named vs Unnamed Views
 
@@ -126,10 +131,11 @@ from forge.stage1b_multi_view import (
 # Enhance review configuration
 review_config = enhance_review_with_multi_view(review_config, brief)
 
-# Compare against multiple views
+# Compare against multiple views with the existing deterministic Divine Eye
 comparison = compare_multi_view(render_paths, reference_paths)
 
-# Aggregate scores
+# Missing/error views contribute zero. Inspect passed, complete, missingViews,
+# failedViews, worstView and worstScore in addition to the aggregate.
 aggregated_score = aggregate_multi_view_scores(comparison["perViewResults"])
 ```
 
@@ -191,13 +197,16 @@ Matches features across all view pairs.
 
 #### `estimate_relative_poses(match_results)`
 
-Estimates relative poses between all view pairs.
+Estimates conservative image-space pose hints between all view pairs.
+Uncalibrated results are explicitly marked as heuristic and cannot produce
+metric depth.
 
 ### Depth Estimation Functions
 
 #### `estimate_depth(match_results, pose_estimation)`
 
-Estimates depth from matched features and poses.
+Estimates depth only when calibrated pose plus explicit focal length and
+baseline are available. It does not invent camera parameters.
 
 ## Geometry Brief Schema
 
@@ -242,9 +251,8 @@ The geometry brief has the following structure:
 - Reports reduced confidence
 
 ### Misaligned Views
-- Uses robust matching with RANSAC
-- Filters outlier matches
 - Reports reduced confidence
+- Does not claim calibrated pose or depth without camera intrinsics
 
 ### Partial Overlap
 - Identifies overlapping regions
@@ -256,7 +264,7 @@ The geometry brief has the following structure:
 Run tests:
 
 ```bash
-python -m pytest forge/tests/multi_view/ -v
+python3 -m unittest discover -s forge/tests
 ```
 
 ## References

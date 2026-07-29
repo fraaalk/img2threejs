@@ -7,7 +7,7 @@ Handles duplicate views (multiple angles of same view).
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 import re
 
 
@@ -56,15 +56,15 @@ def detect_named_views(image_paths: List[Path]) -> Dict[str, Path]:
         Dictionary mapping view names to paths
     """
     named_views = {}
+    name_counts: Dict[str, int] = {}
 
     for path in image_paths:
         filename = path.stem.lower()
-        view_name = _extract_view_name(filename)
-        if view_name:
-            named_views[view_name] = path
-        else:
-            # Use filename as view name if no standard name detected
-            named_views[filename] = path
+        base_name = _extract_view_name(filename) or filename
+        occurrence = name_counts.get(base_name, 0) + 1
+        name_counts[base_name] = occurrence
+        view_name = base_name if occurrence == 1 else f"{base_name}-{occurrence}"
+        named_views[view_name] = path
 
     return named_views
 
@@ -135,7 +135,9 @@ def _extract_view_name(filename: str) -> Optional[str]:
     """
     for view_name, aliases in VIEW_NAMES.items():
         for alias in aliases:
-            if alias in filename:
+            # Match complete filename tokens. Substring matching incorrectly
+            # classified names such as "frontier" and "leftover".
+            if re.search(rf"(^|[^a-z0-9]){re.escape(alias)}([^a-z0-9]|$)", filename):
                 return view_name
     return None
 
@@ -151,7 +153,7 @@ def _get_base_view_name(view_name: str) -> str:
         Base view name
     """
     # Remove common suffixes like "1", "2", "angle", etc.
-    base = re.sub(r'[\d\-_]$', '', view_name)
+    base = re.sub(r'[-_]\d+$', '', view_name)
     base = re.sub(r'[_-]angle$', '', base)
     base = re.sub(r'[_-]view$', '', base)
     return base.strip() or view_name

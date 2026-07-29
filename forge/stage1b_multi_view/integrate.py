@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import json
 import logging
+from copy import deepcopy
 
 from .synthesize import synthesize_geometry_brief
 from .view_counter import count_views
@@ -69,8 +70,8 @@ def run_synthesis_for_intake(
         brief = synthesize_geometry_brief(image_paths, output_path)
 
         result = {
-            "status": "complete",
-            "viewCount": view_count,
+            "status": brief.get("status", "evidence-only"),
+            "viewCount": brief.get("viewCount", view_count),
             "synthesisMode": brief.get("synthesisMode", "unknown"),
             "confidence": brief.get("confidence", 0.0),
             "brief": brief,
@@ -110,8 +111,8 @@ def enhance_intake_record_with_synthesis(
     Returns:
         Updated intake record
     """
-    # Add synthesis field
-    intake_record["synthesis"] = {
+    enhanced_record = deepcopy(intake_record)
+    enhanced_record["synthesis"] = {
         "viewCount": synthesis_result.get("viewCount", 0),
         "synthesisMode": synthesis_result.get("synthesisMode", "unknown"),
         "confidence": synthesis_result.get("confidence", 0.0),
@@ -120,9 +121,9 @@ def enhance_intake_record_with_synthesis(
 
     # Add brief if available
     if synthesis_result.get("brief"):
-        intake_record["synthesis"]["brief"] = synthesis_result["brief"]
+        enhanced_record["synthesis"]["brief"] = deepcopy(synthesis_result["brief"])
 
-    return intake_record
+    return enhanced_record
 
 
 def get_synthesis_summary(synthesis_result: Dict[str, Any]) -> str:
@@ -145,9 +146,10 @@ def get_synthesis_summary(synthesis_result: Dict[str, Any]) -> str:
     elif status == "failed":
         error = synthesis_result.get("error", "unknown error")
         return f"Synthesis failed ({error}) - falling back to code geometry"
-    elif status == "complete":
+    elif status in {"complete", "evidence-only"}:
+        label = "evidence extracted" if status == "evidence-only" else "complete"
         return (
-            f"Multi-view synthesis complete: {view_count} views, "
+            f"Multi-view synthesis {label}: {view_count} views, "
             f"mode={mode}, confidence={confidence:.2f}"
         )
     else:
