@@ -12,6 +12,7 @@ Quality-gated, animation-ready, and deliberately token-efficient — reconstruct
 [![Version](https://img.shields.io/badge/version-1.5.0-green.svg)](CHANGELOG.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Runtime](https://img.shields.io/badge/runtime-Three.js-000000.svg)](https://threejs.org)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757.svg)](#install)
 [![Tooling](https://img.shields.io/badge/tooling-Python%203.10%2B%20stdlib-3776ab.svg)](scripts)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Buy%20Me%20A%20Coffee-FFDD00.svg?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/hoainhowors)
 
@@ -155,7 +156,7 @@ Useful additions depending on the subject:
 - **A saturated anodized or candy finish** — `The coat is candy-coat, not gem-metal. Keep the hue; do not let the environment steal it.`
 - **A cost ceiling** — `Stay at low effort and skip the presentation composer; I only need the evaluation render.`
 
-The scripts run from the skill root and need only Python 3.10+ — nothing to install.
+The scripts run from the skill root — the directory holding `SKILL.md`, which on a plugin install is the plugin's own cache directory — and need only Python 3.10+.
 
 ```bash
 python3 forge/stage1_intake/probe_image.py <image>
