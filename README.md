@@ -87,15 +87,39 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
 
 ---
 
+## Install
+
+**Claude Code — as a plugin (recommended).** No clone, and `/plugin update img2threejs` pulls each release:
+
+```
+/plugin marketplace add img2threejs/img2threejs
+/plugin install img2threejs@img2threejs
+```
+
+The same two steps from a shell: `claude plugin marketplace add img2threejs/img2threejs && claude plugin install img2threejs@img2threejs`.
+
+**Codex CLI, OpenCode, and other SKILL.md hosts.** The installer detects which agents you have and installs into each of their skills directories:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/img2threejs/img2threejs/main/install.sh | sh
+```
+
+Re-run it to update. Add `-s -- --uninstall` to remove it, or `-s -- --target <dir>` to choose the directory yourself.
+
+**Manual.** Clone into whichever skills directory your agent reads:
+
+```bash
+git clone https://github.com/img2threejs/img2threejs.git ~/.claude/skills/img2threejs   # Claude Code, OpenCode
+git clone https://github.com/img2threejs/img2threejs.git ~/.codex/skills/img2threejs     # Codex CLI
+```
+
+Nothing to build and no dependencies: the pipeline scripts are Python 3.10+ standard library only.
+
+---
+
 ## Quick start
 
-1. **Install** — place this folder in your skills directory:
-
-   ```bash
-   git clone https://github.com/img2threejs/img2threejs.git ~/.claude/skills/img2threejs
-   ```
-
-2. **Invoke** — in Claude Code, attach or point to an object image and run:
+1. **Invoke** — attach or point to an object image and run:
 
    ```
    /img2threejs Rebuild this object as a Three.js model, keep the proportions, angles, and colours.
@@ -103,7 +127,7 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
 
    That is enough: the skill classifies the subject, runs the detail inventory, and gates every pass on its own.
 
-3. **Follow the pipeline** — the skill validates the image, writes an assessment and spec, generates the factory pass by pass, and shows you a side-by-side comparison at each step until the render matches.
+2. **Follow the pipeline** — the skill validates the image, writes an assessment and spec, generates the factory pass by pass, and shows you a side-by-side comparison at each step until the render matches.
 
 ### Driving it harder
 
