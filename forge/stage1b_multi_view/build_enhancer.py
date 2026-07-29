@@ -34,11 +34,13 @@ def enhance_build_with_brief(
         "confidence": brief.get("confidence", 0.0),
     }
 
-    # Enhance components with brief data
-    if "components" in brief:
+    # Evidence-only briefs intentionally carry no geometry components. Keep
+    # their provenance above, but do not add an empty build component layer.
+    brief_components = brief.get("components")
+    if isinstance(brief_components, dict) and brief_components:
         enhanced_config["components"] = enhance_build_components(
             enhanced_config.get("components", {}),
-            brief["components"],
+            brief_components,
         )
 
     return enhanced_config

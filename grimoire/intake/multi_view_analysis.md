@@ -21,8 +21,8 @@ Use this protocol when:
 ### Step 1: View Inventory
 
 1. **Count views**: Determine how many images are provided
-2. **Identify views**: Detect named views (front, back, top, etc.) first. For readable unnamed PNGs, group simple luminance signatures into `auto-*` view clusters; those labels are not semantic front/back claims.
-3. **Group duplicates**: If multiple angles of same view exist, group them and retain the higher-quality file
+2. **Identify views**: Detect named views (front, back, top, etc.) first. Preserve `three-quarter`/`iso`/`oblique` observations and their visible direction tokens rather than collapsing them into a front view. A bare `side` is valid evidence but carries no inferred left/right angle. For readable unnamed PNGs, group simple luminance signatures into `auto-*` view clusters; those labels are not semantic front/back claims.
+3. **Group duplicate candidates**: If multiple captures have the same semantic view label, retain the higher-quality file. This is not pixel-level duplicate detection; reference admission owns the stricter image-duplicate check.
 4. **Determine evidence coverage**: Preserve every distinct view and record what each reveals.
    - 1 view: skip synthesis and mark hidden surfaces as unknown
    - 2+ views: run evidence-only synthesis and keep named/duplicate view provenance
@@ -101,6 +101,12 @@ The protocol produces a geometry brief with:
 - Filter outlier matches
 - Report reduced confidence
 
+### Contradictory Views
+- Do not average incompatible dimensions into a fictional object.
+- Select and record a metric authority: a calibrated view or an independently measured real-world prior.
+- Record each conflicting observation as an explicit assumption, including the affected component and confidence.
+- Return `request-input` when no authority can reconcile the disagreement at the requested fidelity.
+
 ### Partial Overlap
 - Identify overlapping regions
 - Only match features in overlap areas
@@ -108,13 +114,21 @@ The protocol produces a geometry brief with:
 
 ## Quality Gates
 
+### Evidence-only (default)
+
 Before proceeding to spec generation:
 - [ ] View count detected correctly
 - [ ] Features detected in all views
 - [ ] Matches found between view pairs
+- [ ] Geometry brief created with bounded confidence scores and unknown surfaces recorded
+- [ ] No metric dimensions or calibrated-depth claim was made
+
+### Calibrated metric envelope (additional)
+
+- [ ] Verified intrinsics and baseline were supplied
+- [ ] Metric solver support is available in the runtime environment
 - [ ] Poses estimated with reasonable accuracy
-- [ ] Depth data generated only when calibration is present
-- [ ] Geometry brief created with confidence scores
+- [ ] Depth data generated and its confidence recorded
 
 ## Integration Points
 

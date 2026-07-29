@@ -220,7 +220,7 @@ def _detect_edge_features(image_path: Path, max_features: int) -> FeatureSet:
     Returns:
         FeatureSet with edge features
     """
-    from forge.stage4_review.make_comparison_sheet import read_png
+    from ..stage1_intake.extract_pbr_evidence import read_png
 
     width, height, pixels = read_png(image_path)
     luminance = [

@@ -21,6 +21,8 @@ VIEW_NAMES = {
     "right": ["right", "medial", "side-right"],
 }
 
+THREE_QUARTER_ALIASES = ("three-quarter", "threequarter", "iso", "oblique")
+
 # Standard view angles (in degrees from front)
 VIEW_ANGLES = {
     "front": 0,
@@ -106,7 +108,7 @@ def _auto_labels_for_unnamed_views(image_paths: List[Path]) -> Dict[Path, str]:
 
 def _image_signature(path: Path) -> Optional[tuple[float, ...]]:
     try:
-        from forge.stage4_review.make_comparison_sheet import read_png
+        from ..stage1_intake.extract_pbr_evidence import read_png
 
         width, height, pixels = read_png(path)
     except (OSError, ValueError):
@@ -197,13 +199,46 @@ def _extract_view_name(filename: str) -> Optional[str]:
     Returns:
         Standard view name or None
     """
-    for view_name, aliases in VIEW_NAMES.items():
-        for alias in aliases:
-            # Match complete filename tokens. Substring matching incorrectly
-            # classified names such as "frontier" and "leftover".
-            if re.search(rf"(^|[^a-z0-9]){re.escape(alias)}([^a-z0-9]|$)", filename):
-                return view_name
-    return None
+    # Preserve all meaningful tokens instead of returning the first match in
+    # VIEW_NAMES insertion order.  A name such as ``iso-front-right`` is a
+    # three-quarter observation, not a front view that happens to mention
+    # right.  The token boundary also keeps ``frontier`` and ``leftover``
+    # unclassified.
+    normalized = re.sub(r"[^a-z0-9]+", "-", filename).strip("-")
+    tokens = [token for token in normalized.split("-") if token]
+
+    def contains_alias(alias: str) -> bool:
+        alias_tokens = alias.split("-")
+        width = len(alias_tokens)
+        return any(tokens[index:index + width] == alias_tokens for index in range(len(tokens) - width + 1))
+
+    matched = {
+        view_name
+        for view_name, aliases in VIEW_NAMES.items()
+        if any(contains_alias(alias) for alias in aliases)
+    }
+    has_three_quarter = any(contains_alias(alias) for alias in THREE_QUARTER_ALIASES)
+
+    # ``side-left`` and ``side-right`` are explicit lateral directions.  Bare
+    # ``side`` is still meaningful evidence, but has no trustworthy angle.
+    has_bare_side = "side" in tokens and not ({"left", "right"} & matched)
+    ordered_directions = [name for name in ("front", "back", "left", "right") if name in matched]
+
+    if has_three_quarter:
+        suffix = "-".join(ordered_directions)
+        return f"three-quarter-{suffix}" if suffix else "three-quarter"
+    if has_bare_side:
+        return "side"
+    if not matched:
+        return None
+
+    # Multiple direction tokens remain distinct labels.  This avoids silently
+    # collapsing an oblique observation into a front/back orthographic view.
+    ordered_matches = [
+        name for name in ("front", "back", "top", "bottom", "left", "right")
+        if name in matched
+    ]
+    return "-".join(ordered_matches)
 
 
 def _get_base_view_name(view_name: str) -> str:

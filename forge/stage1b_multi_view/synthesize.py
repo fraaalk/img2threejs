@@ -165,6 +165,12 @@ def _generate_geometry_brief(
     return {
         "viewCount": view_count,
         "inputViewCount": input_view_count,
+        # This records views collapsed by semantic labels (for example two
+        # explicit front captures). It is not a pixel-level duplicate count;
+        # reference admission owns that stricter check.
+        "semanticDuplicateViewCount": max(0, input_view_count - view_count),
+        # Kept for consumers of the initial schema. Prefer
+        # semanticDuplicateViewCount for new integrations.
         "duplicateViewCount": max(0, input_view_count - view_count),
         "synthesisMode": mode,
         "confidence": round(confidence, 4),
@@ -183,7 +189,8 @@ def _generate_geometry_brief(
         "components": calibrated_components,
         "notes": (
             f"Multi-view evidence extraction with {view_count} unique views. "
-            "Metric envelope is available only when calibrated depth succeeds."
+            "Metric envelope is available only when calibrated depth succeeds; "
+            "semanticDuplicateViewCount is not an image-duplicate claim."
         ),
     }
 

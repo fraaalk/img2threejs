@@ -4,14 +4,14 @@ Multi-View Review Enhancement
 Enhances the Divine Eye review process with multi-view comparison.
 """
 
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Callable, Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import json
 import logging
 
-from forge.stage4_review.divine_eye import evaluate as evaluate_divine_eye
-
 logger = logging.getLogger(__name__)
+
+ViewEvaluator = Callable[[Path, Path], Dict[str, Any]]
 
 
 def enhance_review_with_multi_view(
@@ -72,6 +72,8 @@ def calculate_view_coverage(brief: Dict[str, Any]) -> Dict[str, Any]:
 def compare_multi_view(
     render_paths: Dict[str, Path],
     reference_paths: Dict[str, Path],
+    *,
+    evaluator: ViewEvaluator,
 ) -> Dict[str, Any]:
     """
     Compare render against multiple reference views.
@@ -98,7 +100,7 @@ def compare_multi_view(
     for view_name, reference_path in reference_paths.items():
         if view_name in render_paths:
             render_path = render_paths[view_name]
-            view_result = compare_single_view(render_path, reference_path)
+            view_result = compare_single_view(render_path, reference_path, evaluator=evaluator)
             results["perViewResults"][view_name] = view_result
         else:
             results["perViewResults"][view_name] = {
@@ -134,6 +136,8 @@ def compare_multi_view(
 def compare_single_view(
     render_path: Path,
     reference_path: Path,
+    *,
+    evaluator: ViewEvaluator,
 ) -> Dict[str, Any]:
     """
     Compare render against a single reference view.
@@ -154,7 +158,7 @@ def compare_single_view(
         }
 
     try:
-        evaluation = evaluate_divine_eye(reference_path, render_path)
+        evaluation = evaluator(reference_path, render_path)
     except Exception as exc:  # noqa: BLE001
         logger.error("Multi-view comparison failed: %s", exc)
         return {

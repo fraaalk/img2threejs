@@ -34,11 +34,13 @@ def enhance_spec_with_brief(
         "confidence": brief.get("confidence", 0.0),
     }
 
-    # Enhance components with brief data
-    if "components" in brief and "components" in enhanced_spec:
+    # Evidence-only briefs intentionally carry no geometry components. Keep
+    # their provenance above, but do not run an empty component enhancement.
+    brief_components = brief.get("components")
+    if isinstance(brief_components, dict) and brief_components and "components" in enhanced_spec:
         enhanced_spec["components"] = enhance_components_with_brief(
             enhanced_spec["components"],
-            brief["components"],
+            brief_components,
         )
 
     return enhanced_spec

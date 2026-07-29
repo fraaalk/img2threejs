@@ -52,6 +52,7 @@ from forge.stage1b_multi_view.review_enhancer import (
     enhance_review_with_multi_view,
     generate_multi_view_report,
 )
+from forge.stage4_review.divine_eye import evaluate as evaluate_divine_eye
 from forge.stage1b_multi_view.synthesize import synthesize_geometry_brief
 from forge.stage1b_multi_view.validate_release_evidence import validate_release_evidence
 from forge.stage1b_multi_view.validate_geometry_brief import validate_geometry_brief
@@ -124,6 +125,47 @@ class ViewCounterTests(unittest.TestCase):
             [Path("dragon-front.png"), Path("dragon-front-detail.png")]
         )
         self.assertEqual(set(result), {"front", "front-2"})
+
+    def test_three_quarter_and_side_views_remain_distinct(self) -> None:
+        paths = [
+            Path("house-iso-front-right.png"),
+            Path("house-iso-front-left.png"),
+            Path("house-oblique-back-right.png"),
+            Path("house-three-quarter-back-left.png"),
+            Path("house-front.png"),
+            Path("house-front-detail.png"),
+            Path("house-back.png"),
+            Path("house-side-elevation.png"),
+        ]
+
+        named = detect_named_views(paths)
+        grouped = group_duplicate_views(paths, named)
+
+        self.assertEqual(
+            set(named),
+            {
+                "three-quarter-front-right",
+                "three-quarter-front-left",
+                "three-quarter-back-right",
+                "three-quarter-back-left",
+                "front",
+                "front-2",
+                "back",
+                "side",
+            },
+        )
+        self.assertEqual(
+            set(grouped),
+            {
+                "three-quarter-front-right",
+                "three-quarter-front-left",
+                "three-quarter-back-right",
+                "three-quarter-back-left",
+                "front",
+                "back",
+                "side",
+            },
+        )
 
     def test_duplicate_view_group_prefers_higher_quality_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -364,6 +406,7 @@ class ReviewTests(unittest.TestCase):
             result = compare_multi_view(
                 {"front-primary": render},
                 {"front-primary": reference},
+                evaluator=evaluate_divine_eye,
             )
 
         self.assertTrue(result["complete"])
@@ -387,6 +430,7 @@ class ReviewTests(unittest.TestCase):
             result = compare_multi_view(
                 {"front-primary": render},
                 {"front-primary": reference, "rear": rear},
+                evaluator=evaluate_divine_eye,
             )
 
         self.assertFalse(result["complete"])
@@ -513,6 +557,17 @@ class MutationTests(unittest.TestCase):
 
 
 class EnhancerTests(unittest.TestCase):
+    def test_evidence_only_brief_keeps_provenance_without_empty_component_enhancement(self) -> None:
+        brief = {"viewCount": 3, "synthesisMode": "standard", "components": {}}
+
+        spec = enhance_spec_with_brief({"components": {"shell": {}}}, brief)
+        build = enhance_build_with_brief({"components": {"shell": {}}}, brief)
+
+        self.assertEqual(spec["components"], {"shell": {}})
+        self.assertEqual(build["components"], {"shell": {}})
+        self.assertEqual(spec["multiViewBrief"]["viewCount"], 3)
+        self.assertEqual(build["multiViewBrief"]["viewCount"], 3)
+
     def test_spec_and_build_enhancers_merge_existing_and_new_components(self) -> None:
         brief = {
             "viewCount": 2,

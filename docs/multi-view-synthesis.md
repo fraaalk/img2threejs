@@ -60,6 +60,15 @@ Mode describes available coverage only. Confidence is calculated from feature
 coverage, match coverage/quality, pose evidence and calibrated depth evidence;
 it is never assigned from image count alone.
 
+## Runtime capabilities
+
+The shipped default is pure Python 3.10+ standard library. It always supports
+view inventory, PNG edge evidence, bounded matching, and an `evidence-only`
+brief. Metric pose/depth additionally requires verified camera calibration and
+an environment that provides optional OpenCV and NumPy support; without either,
+the pipeline remains `evidence-only` rather than inventing depth. Those optional
+libraries are not a project or CI dependency.
+
 ## Named vs Unnamed Views
 
 ### Named Views
@@ -70,6 +79,8 @@ If images have descriptive names, they're automatically detected:
 controller-front.png  → "front"
 controller-back.png   → "back"
 controller-top.png    → "top"
+controller-iso-front-right.png → "three-quarter-front-right"
+controller-side-elevation.png → "side" (orientation is not inferred)
 ```
 
 ### Unnamed Views
@@ -127,12 +138,17 @@ from forge.stage1b_multi_view import (
     compare_multi_view,
     aggregate_multi_view_scores,
 )
+from forge.stage4_review.divine_eye import evaluate as evaluate_divine_eye
 
 # Enhance review configuration
 review_config = enhance_review_with_multi_view(review_config, brief)
 
 # Compare against multiple views with the existing deterministic Divine Eye
-comparison = compare_multi_view(render_paths, reference_paths)
+comparison = compare_multi_view(
+    render_paths,
+    reference_paths,
+    evaluator=evaluate_divine_eye,
+)
 
 # Missing/error views contribute zero. Inspect passed, complete, missingViews,
 # failedViews, worstView and worstScore in addition to the aggregate.
