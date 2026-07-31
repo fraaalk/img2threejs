@@ -651,9 +651,11 @@ class IntakeIntegrationTests(unittest.TestCase):
             block_image(rear, 1)
             result = run_synthesis_for_intake([front, rear], "Test Item", output_dir)
 
-        self.assertEqual(result["status"], "evidence-only")
+        # Opposing view pairs (front/rear) without calibration now produce
+        # "complete" status with silhouette-based confidence.
+        self.assertEqual(result["status"], "complete")
         self.assertTrue(result["outputPath"].endswith("test_item_geometry_brief.json"))
-        self.assertIn("evidence extracted", get_synthesis_summary(result))
+        self.assertIn("complete", get_synthesis_summary(result))
         self.assertIn("Single view", get_synthesis_summary({"status": "skipped"}))
         self.assertIn("failed (bad input)", get_synthesis_summary({"status": "failed", "error": "bad input"}))
         self.assertEqual(get_synthesis_summary({"status": "request-input"}), "Synthesis status: request-input")

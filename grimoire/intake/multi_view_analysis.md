@@ -2,162 +2,146 @@
 
 ## Overview
 
-This protocol defines how to analyze multiple reference images and preserve evidence for procedural 3D authoring. It supports variable view counts (1 to N views) with adaptive processing.
+This protocol defines how to handle multiple reference images for procedural 3D reconstruction. The key insight: **images are independent evidence sources, NOT a fused multi-view set**.
 
-## Current Bounded Behavior
+## Core Principle
 
-`forge/stage1b_multi_view/synthesize.py` is deliberately fail-closed. With ordinary uncalibrated photos it returns an `evidence-only` brief, not metric component dimensions or an automatic mesh. With verified `cameraMatrix`, `focalLengthPx`, and `baselineUnits`, it can emit a bounded calibrated depth envelope. `new_pre_spec_assessment.py` accepts repeatable `--image` arguments, stores every path in `sourceImages`, and carries the brief through `new_sculpt_spec.py`. Do not describe uncalibrated evidence extraction as photogrammetry.
+When you have a front image and a back image of the same object:
+
+- **Front image** → front-facing geometry + front texture
+- **Back image** → back-facing geometry + back texture
+- **Do NOT fuse them** — they are independent evidence for different parts of the mesh
+- **Depth (Z) comes from procedural parameters**, not from image analysis
 
 ## When To Use
 
 Use this protocol when:
 - Multiple reference images are provided (2+ views)
-- The user wants to reconstruct an object from multiple angles
-- High-fidelity reconstruction is required
-- Single-view analysis is insufficient
+- The object has different surface patterns on different sides (e.g., CS2 Gamma Doppler)
+- You need to texture both sides of a thin object (knife, blade, plate)
+
+## What Each Image Gives You
+
+### Front Image
+- **2D silhouette** (X, Y coordinates) — the profile of the object
+- **Front texture** — the pixels for front-facing polygons
+- **Proportions** — relative sizes of components
+
+### Back Image
+- **Confirms the silhouette** — if the object is symmetric, the back matches the front
+- **Back texture** — the pixels for back-facing polygons
+- **Unique details** — any features only visible from the back
+
+### What Neither Image Gives You
+- **Z-dimension (depth/thickness)** — this comes from your knowledge of the object
+- **Side profile** — without a side view, the side is a "guess" (straight extrusion)
+- **Cross-section shape** — you define this (diamond for knife, rectangle for plate)
 
 ## Protocol Steps
 
-### Step 1: View Inventory
+### Step 1: Identify View Roles
 
-1. **Count views**: Determine how many images are provided
-2. **Identify views**: Detect named views (front, back, top, etc.) first. Preserve `three-quarter`/`iso`/`oblique` observations and their visible direction tokens rather than collapsing them into a front view. A bare `side` is valid evidence but carries no inferred left/right angle. For readable unnamed PNGs, group simple luminance signatures into `auto-*` view clusters; those labels are not semantic front/back claims.
-3. **Group duplicate candidates**: If multiple captures have the same semantic view label, retain the higher-quality file. This is not pixel-level duplicate detection; reference admission owns the stricter image-duplicate check.
-4. **Determine evidence coverage**: Preserve every distinct view and record what each reveals.
-   - 1 view: skip synthesis and mark hidden surfaces as unknown
-   - 2+ views: run evidence-only synthesis and keep named/duplicate view provenance
-   - calibrated capture: only then promote pose/depth estimates into dimensions
+For each image, determine its role:
+- **Primary reference** — the main view (usually front) — drives silhouette and proportions
+- **Secondary reference** — confirms silhouette, provides back/side texture
+- **Supplementary** — additional angles for complex geometry
 
-### Step 2: Feature Detection
+### Step 2: Extract Silhouette from Primary
 
-For each view:
-1. **Detect features**: Find distinctive visual features (edges, corners, blobs)
-2. **Extract descriptors**: Create feature descriptors for matching
-3. **Quality assessment**: Rate feature quality and coverage
+From the primary reference (front):
+1. Trace the 2D outline — this defines X, Y coordinates
+2. Establish the coordinate system — where is (0, 0, 0)?
+3. Set the scale — how many pixels = 1 Three.js unit?
 
-### Step 3: Cross-View Matching
+### Step 3: Define Depth Procedurally
 
-1. **Match features**: Find corresponding features between view pairs
-2. **Filter matches**: Remove outlier matches using ratio test
-3. **Calculate confidence**: Rate match quality based on count and quality
+The Z-dimension does NOT come from the images. You define it:
 
-### Step 4: Pose Estimation
-
-1. **Estimate relative poses**: Compute camera positions relative to each other
-2. **Calculate baseline**: Determine distance between camera positions
-3. **Assess accuracy**: Rate pose estimation confidence
-
-### Step 5: Depth Estimation
-
-1. **Check calibration first**: require known intrinsics/baseline or an explicit calibrated solver result
-2. **Triangulate points only when calibrated**: otherwise retain match evidence without depth claims
-3. **Keep confidence bounded**: uncalibrated cues cannot become metric dimensions
-
-### Step 6: Geometry Synthesis
-
-1. **Extract dimensions only from calibrated 3D data or agent-authored measurements**
-2. **Attach curvature only when its evidence is explicit**
-3. **Generate an evidence brief**: include per-component confidence and unknowns
-
-## Output Format
-
-The protocol produces a geometry brief with:
-
-```json
-{
-  "viewCount": 6,
-  "synthesisMode": "full",
-  "confidence": 0.49,
-  "status": "evidence-only",
-  "namedViews": {
-    "front": "path/to/front.png",
-    "back": "path/to/back.png"
-  },
-  "components": {
-    "componentName": {
-      "visibleIn": ["front", "top"],
-      "dimensions": {"width": 100, "height": 50},
-      "curvature": "description",
-      "confidence": 0.9
-    }
-  }
-}
 ```
+Blade thickness at spine: 5mm (thick part)
+Blade thickness at edge: 0mm (sharp part)
+Guard thickness: 6mm
+Grip diameter: 11mm
+```
+
+These values come from:
+- Your knowledge of the object (a knife blade is thin)
+- Reference photos that show thickness (3/4 angle, side view)
+- Standard dimensions for the object type
+
+### Step 4: Create Face-Specific Texturing
+
+For a thin object with different patterns on each side:
+
+1. **Create front faces** at Z = +thickness → apply front texture
+2. **Create back faces** at Z = -thickness → apply back texture
+3. **Bridge the edges** → connect front silhouette edges to back silhouette edges
+
+The UV mapping must NOT mirror — front and back textures occupy distinct areas.
+
+### Step 5: Define Cross-Section (for blades)
+
+For a knife blade, the cross-section is a diamond shape:
+- Spine (top): thick
+- Edge (bottom): thin (0mm)
+- Left face: front texture
+- Right face: back texture
+
+This is the "section curve" in the Volcano technique.
 
 ## Edge Cases
 
-### Single View
-- Skip synthesis
-- Use code-written geometry
-- Return minimal brief with low confidence
+### Single View Only
+- Use the front image for silhouette + texture
+- Estimate depth from object knowledge
+- The back is inferred (often mirrored)
 
-### Low-Texture Surfaces
-- Use edge detection instead of feature matching
-- Rely on contour matching
-- Reduce confidence scores
+### Symmetric Object (front = back)
+- Still create separate front and back faces
+- Can use the same texture for both sides
+- But the geometry should still be two-sided
 
-### Misaligned Views
-- Use robust matching with RANSAC
-- Filter outlier matches
-- Report reduced confidence
+### Asymmetric Object (front ≠ back)
+- Front image → front faces
+- Back image → back faces
+- Each side has its own texture
+- The "bridge" between them defines the side profile
 
-### Contradictory Views
-- Do not average incompatible dimensions into a fictional object.
-- Select and record a metric authority: a calibrated view or an independently measured real-world prior.
-- Record each conflicting observation as an explicit assumption, including the affected component and confidence.
-- Return `request-input` when no authority can reconcile the disagreement at the requested fidelity.
-
-### Partial Overlap
-- Identify overlapping regions
-- Only match features in overlap areas
-- Mark non-overlapping components as low confidence
+### No Side View
+- The side is a straight extrusion (front edge → back edge)
+- For a blade, add a grind (taper from spine to edge)
+- Document that the side is approximated
 
 ## Quality Gates
 
-### Evidence-only (default)
-
-Before proceeding to spec generation:
-- [ ] View count detected correctly
-- [ ] Features detected in all views
-- [ ] Matches found between view pairs
-- [ ] Geometry brief created with bounded confidence scores and unknown surfaces recorded
-- [ ] No metric dimensions or calibrated-depth claim was made
-
-### Calibrated metric envelope (additional)
-
-- [ ] Verified intrinsics and baseline were supplied
-- [ ] Metric solver support is available in the runtime environment
-- [ ] Poses estimated with reasonable accuracy
-- [ ] Depth data generated and its confidence recorded
+Before proceeding to spec:
+- [ ] Primary silhouette extracted correctly
+- [ ] Front and back images are aligned (same scale, same object position)
+- [ ] Depth values are defined (even if approximated)
+- [ ] Face-specific texturing plan is documented
+- [ ] Cross-section shape is defined (for blades)
 
 ## Integration Points
 
 ### With Intake
-- Call `run_synthesis_for_intake()` during intake processing
-- Add synthesis result to intake record
-- Use synthesis mode to guide further processing
+- Record each image's role (primary, secondary, supplementary)
+- Do NOT fuse images into a single multi-view synthesis
+- Store each image path separately
 
 ### With Spec
-- Pass geometry brief to spec generation
-- Use brief dimensions for component definitions
-- Incorporate confidence scores into spec
+- Use primary silhouette for componentTree dimensions
+- Use front image for front-facing material
+- Use back image for back-facing material
+- Document depth as procedural parameter
 
 ### With Build
-- Use brief dimensions for geometry generation
-- Apply curvature data to surface profiles
-- Generate brief-aware Three.js code
+- Create geometry using tapered curves (spine + taper + section)
+- Apply front texture to front faces
+- Apply back texture to back faces
+- Bridge edges between front and back silhouettes
 
 ### With Review
-- Compare against all provided views
-- Aggregate scores across views
-- Report per-view breakdown
-- For the PS5 iteration target, record baseline and multi-view review artifacts in a release-evidence JSON and validate it with `validate_release_evidence.py`; do not claim the target from synthetic tests.
-
-## References
-
-- `forge/stage1b_multi_view/synthesize.py` - Main synthesis module
-- `forge/stage1b_multi_view/view_counter.py` - View counting and detection
-- `forge/stage1b_multi_view/feature_detector.py` - Feature detection
-- `forge/stage1b_multi_view/feature_matcher.py` - Feature matching
-- `forge/stage1b_multi_view/pose_estimator.py` - Pose estimation
-- `forge/stage1b_multi_view/depth_estimator.py` - Depth estimation
+- Compare front render against front reference
+- Compare back render against back reference
+- Compare side render against expectation (even without side reference)
+- Report per-face confidence

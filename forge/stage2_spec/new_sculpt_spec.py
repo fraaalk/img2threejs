@@ -1598,6 +1598,38 @@ def make_spec(
                     confidence = brief_component.get("confidence")
                     if isinstance(confidence, (int, float)):
                         component["multiViewConfidence"] = confidence
+        # Rebuild viewEvidence from namedViews when available.
+        # The hardcoded single-entry viewEvidence is replaced with per-view
+        # entries so downstream (TypeScript generation, diagnostics) can
+        # reference the correct source image for each face.
+        # namedViews can be in brief sub-object or at top level of synthesis.
+        named_views = None
+        if isinstance(brief, dict):
+            named_views = brief.get("namedViews")
+        if not named_views:
+            named_views = multi_view_synthesis.get("namedViews")
+        if isinstance(named_views, dict) and named_views:
+            synthesis_confidence = (
+                brief.get("confidence", 0.5) if isinstance(brief, dict)
+                else multi_view_synthesis.get("confidence", 0.5)
+            )
+            spec["viewEvidence"] = [
+                {
+                    "id": view_name,
+                    "view": view_name,
+                    "sourceImage": str(view_path),
+                    "imageRegion": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "width": 1.0,
+                        "height": 1.0,
+                        "units": "normalized",
+                    },
+                    "observations": [],
+                    "confidence": round(synthesis_confidence, 4),
+                }
+                for view_name, view_path in named_views.items()
+            ]
     inject_geometry_rules(spec, target_name)
     return spec
 

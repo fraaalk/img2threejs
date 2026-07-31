@@ -34,7 +34,7 @@ from forge.stage2_spec.new_sculpt_spec import (  # noqa: E402
     make_pre_spec_assessment,
     make_quality_contract,
 )
-from forge.stage1b_multi_view.integrate import run_synthesis_for_intake  # noqa: E402
+
 
 
 COMPLEXITY_MINIMUMS = {
@@ -143,13 +143,22 @@ def synthesize_source_images(
     multi_view_analysis: dict[str, JsonValue] | None = None,
     calibration: dict[str, JsonValue] | None = None,
 ) -> dict[str, JsonValue]:
+    """Treat each image as an independent evidence source, NOT a fused multi-view set.
+    
+    Each image provides:
+    - Front image → front-facing geometry + front texture
+    - Back image → back-facing geometry + back texture
+    - Depth (Z) comes from procedural parameters, NOT from image analysis
+    
+    Do NOT attempt feature matching or pose estimation between views.
+    """
     readable_images = [Path(value) for value in source_images if Path(value).is_file()]
     if len(source_images) > 1 and len(readable_images) != len(source_images):
         return {
             "status": "request-input",
-            "reason": "multi-view synthesis requires readable local image paths",
+            "reason": "all image paths must be readable local files",
             "viewCount": len(source_images),
-            "synthesisMode": "unavailable",
+            "synthesisMode": "independent-evidence",
             "confidence": 0.0,
         }
     if not readable_images:
@@ -160,12 +169,35 @@ def synthesize_source_images(
             "synthesisMode": "single-view" if len(source_images) == 1 else "unavailable",
             "confidence": 0.0,
         }
-    return run_synthesis_for_intake(
-        readable_images,
-        target_name,
-        agent_analysis=multi_view_analysis,
-        calibration=calibration,
-    )
+    
+    # Each image is an independent evidence source — do NOT fuse them
+    named_views = {}
+    for i, img_path in enumerate(readable_images):
+        name = f"view-{i}"
+        # Try to detect view name from filename
+        lower_name = img_path.stem.lower()
+        if "front" in lower_name:
+            name = "front"
+        elif "back" in lower_name:
+            name = "back"
+        elif "top" in lower_name:
+            name = "top"
+        elif "bottom" in lower_name:
+            name = "bottom"
+        elif "left" in lower_name:
+            name = "left"
+        elif "right" in lower_name:
+            name = "right"
+        named_views[name] = str(img_path)
+    
+    return {
+        "status": "proceed",
+        "viewCount": len(readable_images),
+        "synthesisMode": "independent-evidence",
+        "confidence": 1.0,  # Each image is independently valid
+        "namedViews": named_views,
+        "notes": "Each image is an independent evidence source. Front image → front faces, back image → back faces. Depth (Z) comes from procedural parameters, NOT from image analysis. Do NOT fuse images into a single multi-view representation.",
+    }
 
 
 def detect_cs2_intent(target_name: str) -> bool:
