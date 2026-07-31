@@ -21,8 +21,8 @@ from forge.stage1b_multi_view.view_counter import detect_named_views
 
 # Fixture images
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-FRONT_IMAGE = FIXTURES_DIR / "m9-front.webp"
-BACK_IMAGE = FIXTURES_DIR / "m9-back.webp"
+FRONT_IMAGE = FIXTURES_DIR / "m9-front.png"
+BACK_IMAGE = FIXTURES_DIR / "m9-back.png"
 
 
 class TestRealImageSynthesis(unittest.TestCase):
@@ -83,9 +83,9 @@ class TestMultiViewSynthesis3Images(unittest.TestCase):
         
         # Create 3 copies with different view names
         for name in ['front', 'back', 'left']:
-            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.webp')
+            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.png')
         
-        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.webp'))
+        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.png'))
         cls.synthesis_result = synthesize_geometry_brief(
             image_paths=cls.image_paths
         )
@@ -127,9 +127,9 @@ class TestMultiViewSynthesis4Images(unittest.TestCase):
         
         # Create 4 copies with different view names
         for name in ['front', 'back', 'left', 'right']:
-            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.webp')
+            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.png')
         
-        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.webp'))
+        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.png'))
         cls.synthesis_result = synthesize_geometry_brief(
             image_paths=cls.image_paths
         )
@@ -167,9 +167,9 @@ class TestMultiViewSynthesis5Images(unittest.TestCase):
         
         # Create 5 copies with different view names
         for name in ['front', 'back', 'left', 'right', 'top']:
-            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.webp')
+            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.png')
         
-        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.webp'))
+        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.png'))
         cls.synthesis_result = synthesize_geometry_brief(
             image_paths=cls.image_paths
         )
@@ -207,9 +207,9 @@ class TestMultiViewSynthesis6Images(unittest.TestCase):
         
         # Create 6 copies with different view names
         for name in ['front', 'back', 'left', 'right', 'top', 'bottom']:
-            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.webp')
+            shutil.copy(FRONT_IMAGE, cls.tmpdir_path / f'm9-{name}.png')
         
-        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.webp'))
+        cls.image_paths = list(cls.tmpdir_path.glob('m9-*.png'))
         cls.synthesis_result = synthesize_geometry_brief(
             image_paths=cls.image_paths
         )

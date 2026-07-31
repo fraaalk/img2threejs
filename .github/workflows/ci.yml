@@ -14,5 +14,5 @@ jobs:
     uses: img2threejs/ci-workflows/.github/workflows/python-ci.yml@4b7a0612d2c52815792124a18ae3f9032a4f0a88
     with:
       python-version: "3.10"
-      pip-install: "Pillow"
+      pip-install: "Pillow opencv-python-headless"
       test-command: python3 -m unittest discover -s forge/tests
