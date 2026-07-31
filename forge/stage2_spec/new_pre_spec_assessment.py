@@ -190,7 +190,7 @@ def synthesize_source_images(
             name = "right"
         named_views[name] = str(img_path)
     
-    return {
+    result = {
         "status": "proceed",
         "viewCount": len(readable_images),
         "synthesisMode": "independent-evidence",
@@ -198,6 +198,15 @@ def synthesize_source_images(
         "namedViews": named_views,
         "notes": "Each image is an independent evidence source. Front image → front faces, back image → back faces. Depth (Z) comes from procedural parameters, NOT from image analysis. Do NOT fuse images into a single multi-view representation.",
     }
+    
+    # Integrate multi-view analysis if provided (e.g., from agent calibration)
+    if multi_view_analysis is not None:
+        result["brief"] = multi_view_analysis
+        # If calibrated data has components, use it for status
+        if multi_view_analysis.get("calibrated") and multi_view_analysis.get("components"):
+            result["status"] = "evidence-only"
+    
+    return result
 
 
 def detect_cs2_intent(target_name: str) -> bool:

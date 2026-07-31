@@ -20,6 +20,10 @@ from typing import List, Optional, Dict, Any
 if __package__ in {None, ""}:
     project_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(project_root))
+    from forge.stage1b_multi_view.content_detector import (
+        detect_opposing_by_content,
+        find_opposing_pairs_in_group,
+    )
     from forge.stage1b_multi_view.depth_estimator import estimate_depth
     from forge.stage1b_multi_view.feature_detector import detect_features
     from forge.stage1b_multi_view.feature_matcher import match_features
@@ -31,6 +35,7 @@ if __package__ in {None, ""}:
         group_duplicate_views,
     )
 else:
+    from .content_detector import detect_opposing_by_content, find_opposing_pairs_in_group
     from .depth_estimator import estimate_depth
     from .feature_detector import detect_features
     from .feature_matcher import match_features
@@ -76,6 +81,24 @@ def synthesize_geometry_brief(
             input_view_count=input_view_count,
             grouped_views=grouped_views,
         )
+
+    # Step 2c: For 3+ images, check if any pair is opposing
+    # If we find an opposing pair, use the best pair for the brief
+    if calibration is None and view_count >= 3:
+        paths = list(grouped_views.values())
+        opposing_pairs = find_opposing_pairs_in_group(paths)
+        if opposing_pairs:
+            # Use the best opposing pair
+            best_i, best_j, best_match = opposing_pairs[0]
+            pair_views = {
+                list(grouped_views.keys())[best_i]: paths[best_i],
+                list(grouped_views.keys())[best_j]: paths[best_j],
+            }
+            return _generate_opposing_view_brief(
+                view_count=view_count,
+                input_view_count=input_view_count,
+                grouped_views=pair_views,
+            )
 
     # Step 3: Detect features in each view
     all_features = {}
@@ -144,13 +167,28 @@ _OPPOSING_VIEW_PAIRS = [
 def _is_opposing_view_pair(grouped_views: Dict[str, Path]) -> bool:
     """Check if the named views form an opposing pair (front/back, etc.).
 
-    Returns True only when there are exactly 2 unique view names and they
-    belong to one of the known opposing pairs.
+    Uses a two-stage detection:
+    1. Filename-based: fast check for known opposing name pairs
+    2. Content-based: silhouette IoU + COLOR histogram comparison
+
+    Returns True when views are opposing (same shape, different surface).
     """
     if len(grouped_views) != 2:
         return False
+
+    # Stage 1: Fast filename-based detection
     view_names = set(grouped_views.keys())
-    return any(view_names == pair for pair in _OPPOSING_VIEW_PAIRS)
+    if any(view_names == pair for pair in _OPPOSING_VIEW_PAIRS):
+        return True
+
+    # Stage 2: Content-based detection (works with any naming)
+    paths = list(grouped_views.values())
+    try:
+        match = detect_opposing_by_content(paths[0], paths[1])
+        return match.is_opposing
+    except Exception:
+        # If content detection fails, fall back to False
+        return False
 
 
 def _generate_opposing_view_brief(
@@ -223,9 +261,19 @@ def _generate_opposing_view_brief(
 def _estimate_silhouette_overlap(grouped_views: Dict[str, Path]) -> float:
     """Estimate silhouette overlap between opposing views.
 
-    For CS2 item screenshots (same resolution, same object), the silhouette
-    should be nearly identical. Uses image dimension similarity as a proxy.
+    Uses content-based detection when available, falls back to dimension
+    similarity as a proxy.
     """
+    # Try content-based detection first (more accurate)
+    try:
+        paths = list(grouped_views.values())
+        if len(paths) == 2:
+            match = detect_opposing_by_content(paths[0], paths[1])
+            return match.iou
+    except Exception:
+        pass
+
+    # Fallback: dimension-based estimation
     try:
         from PIL import Image
 

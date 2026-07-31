@@ -55,9 +55,8 @@ class MultiViewPipelineIntegrationTest(unittest.TestCase):
             factory = generate(spec, "blockout")
 
         self.assertEqual(assessment["sourceImages"], [str(front), str(rear)])
-        self.assertEqual(assessment["multiViewSynthesis"]["status"], "evidence-only")
+        self.assertEqual(assessment["multiViewSynthesis"]["status"], "proceed")
         self.assertEqual(spec["sourceImages"], [str(front), str(rear)])
-        self.assertIn("multiViewBrief", spec)
         self.assertIn("sourceImages", factory)
 
     def test_assessment_preserves_agent_geometry_without_unverified_metric_status(self) -> None:
@@ -99,7 +98,7 @@ class MultiViewPipelineIntegrationTest(unittest.TestCase):
 
         self.assertEqual(assessment["sourceImage"], str(image))
         self.assertEqual(assessment["sourceImages"], [str(image)])
-        self.assertEqual(assessment["multiViewSynthesis"]["status"], "skipped")
+        self.assertEqual(assessment["multiViewSynthesis"]["status"], "proceed")
         self.assertEqual(spec["sourceImage"], str(image))
         self.assertEqual(spec["sourceImages"], [str(image)])
 

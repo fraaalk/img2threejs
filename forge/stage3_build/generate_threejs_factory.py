@@ -10,7 +10,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from orchestrate_passes import pass_specific_gaps
+if __package__ in {None, ""}:
+    project_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(project_root))
+    from forge.stage3_build.orchestrate_passes import pass_specific_gaps
+else:
+    from .orchestrate_passes import pass_specific_gaps
 
 
 VALID_PRIMITIVES = {
