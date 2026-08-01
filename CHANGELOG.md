@@ -5,6 +5,25 @@ All notable changes to **img2threejs** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Add a repository-local mandatory workflow checklist, resume gate, and evidence-backed step
+  tracking under `.img2threejs/state.json`.
+- Add per-pass and total correction ceilings derived from `reviewHistory`; `forge/next.py` now
+  hard-stops when either limit is reached.
+- Add an executable CS2 review CLI and profile-specific CS2/character checklist gates.
+- Add explicit suitability, projection-route, and material-evidence decisions to every profile.
+
+### Changed
+- Keep progressive-disclosure references while making CS2 intake, deterministic review gates,
+  self-correction, multi-angle review, part coverage, and action-ready validation explicit router
+  requirements.
+- Order each pass as build, render, Tier 1, multi-angle, deterministic pass check, profile review,
+  AI review, and sync.
+- Make regeneration action-aware so `refine-code` cannot overwrite the artifact it must repair,
+  and reject spec paths that disagree with local state.
+
 ## [1.5.0] — 2026-07-28
 
 ### Added

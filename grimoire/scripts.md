@@ -7,6 +7,29 @@ paths resolve as `forge/<name>.py`. Non-zero exit = a gate failed; read the prin
 Division of labor: **scripts enforce structure and package evidence; they never score visuals.**
 The acceptance score always comes from the agent's own vision inspecting the comparison sheet.
 
+## state.py and next.py
+
+- `state.py init --state .img2threejs/state.json --reference IMG [--profile generic|cs2|character]`
+  creates the local mandatory checklist. It refuses to overwrite existing state.
+- `state.py status --state .img2threejs/state.json [--json]` reports the current step and loop limits.
+- `state.py mark STEP... --state .img2threejs/state.json --evidence PATH` records completed evidence.
+  Use `--status skipped --reason "..."` only when a step is genuinely not applicable.
+- `next.py --state .img2threejs/state.json [spec.json]` is the mandatory start/resume gate. It
+  derives correction counts from `reviewHistory` and exits 3 at the per-pass or total hard ceiling.
+
+Defaults are 3 `refine-spec`/`refine-code` decisions per pass and 6 total. These are safety limits,
+not targets; stop earlier on success, repeated defects, oscillation, or plateau.
+
+The pass checklist is executable in dependency order: generate, render, Tier 1, multi-angle,
+`orchestrate_passes.py check`, profile-specific review, AI review, then sync. The CS2 profile runs:
+
+`stage4_review/cs2_review.py --manifest cs2-intake.json --metrics cs2-review-inputs.json --scene forge/tests/fixtures/knife_review_scene.json --out cs2-review.json`
+
+The character profile requires the reconstruction/likeness contracts, landmark evidence, and an
+explicit stylized-versus-projection route decision before pre-spec authoring.
+Every profile also records a reference-suitability verdict, a projection-route decision, and a
+material/PBR evidence decision. A non-applicable conditional gate must be skipped with a reason.
+
 ## stage1_intake/probe_image.py
 `stage1_intake/probe_image.py <image>` — image type, dimensions, aspect ratio, obvious technical
 issues. Metadata only; not a substitute for visual inspection.
@@ -44,6 +67,9 @@ threshold (default 0.7), and every critical feature ≥ its own threshold.
 Emits a TypeScript Three.js `Group` factory for the **current unlocked pass only**. Passing a
 future `--pass-id` fails until earlier passes are reviewed `continue`. Output exposes
 `root.userData.sculptRuntime` (nodes/meshes/sockets/colliders/destructionGroups) — hand-refine it.
+Use `--force` for the next pass only after preserving valid hand refinements in the spec.
+Do not regenerate after `refine-code`; edit the existing artifact. Regenerate with `--force` after
+`refine-spec` or when advancing to a new pass.
 
 ## stage4_review/make_comparison_sheet.py
 `stage4_review/make_comparison_sheet.py --reference IMG --render SHOT --out cmp.png [--panel-width N] [--panel-height N] [--gutter N] [--json]`
