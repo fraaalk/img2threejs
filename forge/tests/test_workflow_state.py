@@ -29,6 +29,11 @@ class WorkflowStateTest(unittest.TestCase):
         self.assertEqual(payload["loop"]["passCount"], 0)
         self.assertEqual(payload["loop"]["maxPerPass"], 3)
         self.assertIn("part-coverage", payload["pending"])
+        ids = [entry["id"] for entry in state["checklist"]]
+        self.assertLess(ids.index("reference-suitability"), ids.index("reference-admission"))
+        self.assertLess(ids.index("detail-inventory"), ids.index("projection-route"))
+        self.assertLess(ids.index("projection-route"), ids.index("spec-authoring"))
+        self.assertLess(ids.index("material-evidence"), ids.index("strict-validation"))
 
     def test_cs2_state_includes_classification_and_manifest_before_pre_spec(self):
         state = new_state("knife.png", profile="cs2")
@@ -44,7 +49,7 @@ class WorkflowStateTest(unittest.TestCase):
         ids = [entry["id"] for entry in state["checklist"]]
         self.assertLess(ids.index("character-contract-read"), ids.index("character-landmarks"))
         self.assertLess(ids.index("character-landmarks"), ids.index("pre-spec-assessment"))
-        self.assertLess(ids.index("character-projection-route"), ids.index("pre-spec-assessment"))
+        self.assertLess(ids.index("character-landmarks"), ids.index("projection-route"))
 
     def test_pass_commands_follow_executable_gate_order(self):
         state = new_state("reference.png", spec="spec.json")

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add per-pass and total correction ceilings derived from `reviewHistory`; `forge/next.py` now
   hard-stops when either limit is reached.
 - Add an executable CS2 review CLI and profile-specific CS2/character checklist gates.
+- Add explicit suitability, projection-route, and material-evidence decisions to every profile.
 
 ### Changed
 - Keep progressive-disclosure references while making CS2 intake, deterministic review gates,

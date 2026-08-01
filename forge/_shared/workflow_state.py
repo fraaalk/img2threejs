@@ -16,11 +16,23 @@ REFINE_ACTIONS: Final = {"refine-spec", "refine-code"}
 
 SETUP_STEPS: Final = (
     ("image-analysis", "Read grimoire/intake/image_analysis.md and analyze {reference}"),
+    (
+        "reference-suitability",
+        "Read grimoire/intake/validation_rubric.md and record a pass, conditional, or reject verdict for {reference}",
+    ),
     ("reference-admission", "python3 forge/stage1_intake/check_reference_admission.py {reference}"),
     ("local-spec-search", "Run the local evidence search before authoring the assessment"),
     ("pre-spec-assessment", "python3 forge/stage2_spec/new_pre_spec_assessment.py \"<name>\" --image {reference} --out assessment.json"),
     ("detail-inventory", "python3 forge/stage1_intake/build_detail_inventory.py {reference} --mode grid-3x3 --out-dir detail-inventory --out di.json"),
+    (
+        "projection-route",
+        "Record whether projection is required; if required run solve_camera_pose.py, delight_albedo.py, and bake_projected_texture.py, otherwise skip with a reason",
+    ),
     ("spec-authoring", "python3 forge/stage2_spec/new_sculpt_spec.py \"<name>\" --image {reference} --assessment assessment.json --out object-sculpt-spec.json"),
+    (
+        "material-evidence",
+        "When material fidelity matters, run analyze_texture.py and extract_pbr_evidence.py per verified crop; otherwise skip with a reason",
+    ),
     ("strict-validation", "python3 forge/stage2_spec/validate_sculpt_spec.py {spec} --strict-quality"),
 )
 
@@ -32,10 +44,6 @@ CHARACTER_STEPS: Final = (
     (
         "character-landmarks",
         "python3 forge/stage1_intake/extract_landmarks.py {reference} --out anatomy.json --overlay landmarks.png",
-    ),
-    (
-        "character-projection-route",
-        "Record stylized vs maximum-likeness routing; for projection prepare referenceCamera, de-lit albedo, and bake descriptor, otherwise skip with a reason",
     ),
 )
 
@@ -97,11 +105,10 @@ def new_state(
     if max_per_pass < 1 or max_total < 1 or max_per_pass > max_total:
         raise WorkflowStateError("loop limits require 1 <= max-per-pass <= max-total")
     setup = [_step(*item, scope="setup") for item in SETUP_STEPS]
+    insertion = next(index for index, item in enumerate(setup) if item["id"] == "local-spec-search")
     if profile == "cs2":
-        insertion = 2
         setup[insertion:insertion] = [_step(*item, scope="setup") for item in CS2_STEPS]
     elif profile == "character":
-        insertion = 2
         setup[insertion:insertion] = [_step(*item, scope="setup") for item in CHARACTER_STEPS]
     pass_steps = list(PASS_STEPS)
     if profile == "cs2":

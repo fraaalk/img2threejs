@@ -72,7 +72,8 @@ are derived from `reviewHistory` actions `refine-spec`/`refine-code`, not agent 
 
 Profiles add mandatory gates rather than changing the core order: `cs2` requires classification,
 manifest, and a machine-readable CS2 review before AI review; `character` requires the character
-contracts, landmark evidence, and an explicit stylized-versus-projection route decision.
+contracts and landmark evidence. Every profile records suitability, projection applicability, and
+material-evidence applicability; conditional steps require evidence or an explicit skip reason.
 
 ## The Loop (scripts do enforcement; agent vision does judgment)
 

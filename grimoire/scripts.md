@@ -27,6 +27,8 @@ The pass checklist is executable in dependency order: generate, render, Tier 1, 
 
 The character profile requires the reconstruction/likeness contracts, landmark evidence, and an
 explicit stylized-versus-projection route decision before pre-spec authoring.
+Every profile also records a reference-suitability verdict, a projection-route decision, and a
+material/PBR evidence decision. A non-applicable conditional gate must be skipped with a reason.
 
 ## stage1_intake/probe_image.py
 `stage1_intake/probe_image.py <image>` — image type, dimensions, aspect ratio, obvious technical
