@@ -5,6 +5,19 @@ All notable changes to **img2threejs** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Add a repository-local mandatory workflow checklist, resume gate, and evidence-backed step
+  tracking under `.img2threejs/state.json`.
+- Add per-pass and total correction ceilings derived from `reviewHistory`; `forge/next.py` now
+  hard-stops when either limit is reached.
+
+### Changed
+- Keep progressive-disclosure references while making CS2 intake, deterministic review gates,
+  self-correction, multi-angle review, part coverage, and action-ready validation explicit router
+  requirements.
+
 ## [1.5.0] — 2026-07-28
 
 ### Added

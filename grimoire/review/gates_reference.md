@@ -1,7 +1,7 @@
 # Gates Reference (full contract)
 
-Use this reference for the exact behavior of each gate script. `SKILL.md` keeps only the one-line
-summary; this file is the detail.
+Read this reference completely before any visual review or `continue` decision. `SKILL.md` keeps
+only the executable order and one-line summary; this file defines the mandatory gate behavior.
 
 - **Suitability + reference integrity**: pass / conditional / reject before any planning
   (`grimoire/intake/validation_rubric.md`), AND every reference admitted via

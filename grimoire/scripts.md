@@ -7,6 +7,19 @@ paths resolve as `forge/<name>.py`. Non-zero exit = a gate failed; read the prin
 Division of labor: **scripts enforce structure and package evidence; they never score visuals.**
 The acceptance score always comes from the agent's own vision inspecting the comparison sheet.
 
+## state.py and next.py
+
+- `state.py init --state .img2threejs/state.json --reference IMG [--profile generic|cs2|character]`
+  creates the local mandatory checklist. It refuses to overwrite existing state.
+- `state.py status --state .img2threejs/state.json [--json]` reports the current step and loop limits.
+- `state.py mark STEP... --state .img2threejs/state.json --evidence PATH` records completed evidence.
+  Use `--status skipped --reason "..."` only when a step is genuinely not applicable.
+- `next.py --state .img2threejs/state.json [spec.json]` is the mandatory start/resume gate. It
+  derives correction counts from `reviewHistory` and exits 3 at the per-pass or total hard ceiling.
+
+Defaults are 3 `refine-spec`/`refine-code` decisions per pass and 6 total. These are safety limits,
+not targets; stop earlier on success, repeated defects, oscillation, or plateau.
+
 ## stage1_intake/probe_image.py
 `stage1_intake/probe_image.py <image>` — image type, dimensions, aspect ratio, obvious technical
 issues. Metadata only; not a substitute for visual inspection.

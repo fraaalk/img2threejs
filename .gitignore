@@ -19,6 +19,7 @@ docs/PLAN_*.md
 .omc/
 .omo/
 .opencode/
+.img2threejs/
 
 # Extracted Valve CS2 textures -- IP belongs to Valve, never committed.
 cs2_textures/

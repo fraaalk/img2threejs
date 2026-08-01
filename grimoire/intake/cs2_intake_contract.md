@@ -1,5 +1,9 @@
 # CS2 Intake Contract
 
+Read this reference completely for every CS2 request before creating `cs2-intake.json` or running
+pre-spec assessment. Do not advance the local checklist until its classification and manifest
+requirements are satisfied.
+
 For a CS2 item, the target is observable agreement between the supplied image and the rendered
 item: silhouette, proportions, edge profile, hardware layout, coating colour, pattern placement,
 wear, roughness response, and camera framing. Every decision must be traceable to evidence or be

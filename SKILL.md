@@ -24,7 +24,9 @@ action-ready props, game objects, botanical/mechanical parts, and stylized recon
 ## Core Promise
 
 Sculpt from a photo, in order — never one-shot a mesh:
-1. **Run `python3 forge/next.py <spec>` first.** It reports the current unlocked pass, exact next command, and unmet acceptance criteria.
+1. **Use local state first.** Initialize it once, then run
+   `python3 forge/next.py --state .img2threejs/state.json [<spec>]` at every start/resume and before
+   every correction iteration. Obey a hard stop; never continue from memory.
 2. **Validate** the image is a suitable 3D target (`grimoire/intake/validation_rubric.md`).
 3. **Assess** object class + complexity, then write a `qualityContract` before any code.
 3. **Spec** it: component hierarchy, materials, lighting, pivots, sockets, action anchors.
@@ -49,6 +51,25 @@ Full rule + examples: `grimoire/review/self_correction.md`.
   an explicit request for the user/vision provider to supply one; heuristic detection alone is not
   enough to select a geometry adapter
 
+## Mandatory Local State Gate
+
+Conversation context is disposable; `.img2threejs/state.json` is the local checklist authority.
+Initialize it once per reconstruction:
+
+`python3 forge/state.py init --state .img2threejs/state.json --reference <img> --profile <generic|cs2|character>`
+
+At every fresh start, resume, or correction loop, run
+`python3 forge/next.py --state .img2threejs/state.json [object-sculpt-spec.json]` before touching
+code. It prints the current step, pass, incomplete mandatory steps, exact next command, and
+`loop/max`. Exit code 3 or `status=stopped` is a hard stop: report the reason and request input.
+Never bypass it by reconstructing progress from chat history.
+
+After evidence exists, record it with
+`python3 forge/state.py mark <step-id> --state .img2threejs/state.json --evidence <path>`.
+Mark a non-applicable step `skipped` only with `--reason`; silent omission is forbidden. Loop counts
+are derived from `reviewHistory` actions `refine-spec`/`refine-code`, not agent memory. Defaults are
+3 corrections per pass and 6 total.
+
 ## The Loop (scripts do enforcement; agent vision does judgment)
 
 Run scripts from the skill root (`forge/...`). Pure Python 3.10+ stdlib, no pip installs.
@@ -65,10 +86,13 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
     `python3 forge/stage2_spec/new_pre_spec_assessment.py "Name" --image <img> --out assessment.json`
     (auto-runs BM25, auto-picks `cs2`/`core_3d` collection, writes a `localSpecSearch` bundle that
     `new_sculpt_spec.py --assessment` carries into the spec). Full query-expansion recipe
-    (bilingual terms, focused `search_specs.py` retrieval, cache rules): `grimoire/intake/local_spec_search.md`.
+    (bilingual terms, focused `search_specs.py` retrieval, cache rules):
+    `grimoire/intake/local_spec_search.md`. MUST read it before retrying an incomplete or
+    domain-specific query.
 1b. **CS2 intake manifest** — for a CS2 request, create and validate `cs2-intake.json` before
     pre-spec authoring (admission, heuristic signal, classification, family/route resolution).
-    Full layer contract, intake order, and surface/review rule: `grimoire/intake/cs2_intake_contract.md`.
+    MUST read `grimoire/intake/cs2_intake_contract.md` completely before creating the manifest or
+    running pre-spec assessment.
 2. **Pre-Spec Assessment Gate** — classify + score complexity + write the quality contract:
    `forge/stage2_spec/new_pre_spec_assessment.py "Name" --image <img> --complexity <simple|moderate|complex|ultra-complex> --out assessment.json`. Rules: `grimoire/intake/quality_contract.md`.
    Set `objectClass.primaryDomain` (`object` | `character` | `hybrid`) and fill the seeded
@@ -125,20 +149,31 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    local overrides, no micro groups is NOT implementation-ready even if JSON validates).
 6. **Locked build passes** — only touch the currently unlocked pass:
    `forge/stage3_build/orchestrate_passes.py status object-sculpt-spec.json`
-   `forge/stage3_build/orchestrate_passes.py check object-sculpt-spec.json --pass-id <pass>`
    `forge/stage3_build/generate_threejs_factory.py object-sculpt-spec.json --out src/createObjectModel.ts`
    (generator is pass-gated: a future `--pass-id` fails until prior passes are reviewed `continue`).
 7. Render the current pass in a browser/preview, capture a screenshot at a review viewpoint.
-8. Package one side-by-side sheet, then inspect it with agent vision:
+8. **Run deterministic gates before AI vision.** MUST read
+   `grimoire/review/gates_reference.md` and `grimoire/review/self_correction.md` completely. Run
+   `forge/stage4_review/diagnose_render.py` and record the passing Tier 1 result with
+   `--spec object-sculpt-spec.json --pass-id <pass> --in-place`; for non-planar forms also run
+   `forge/stage4_review/diagnose_render_multi_angle.py` with the fixed view and at least two
+   meaningful orbit views. Then run
+   `forge/stage3_build/orchestrate_passes.py check object-sculpt-spec.json --pass-id <pass>`.
+9. Package one side-by-side sheet, then inspect it with agent vision:
    `forge/stage4_review/make_comparison_sheet.py --reference <img> --render <shot> --out cmp.png --json`.
-9. Record the review (overall + per-layer + per-feature scores + decision):
+10. Record the review (overall + per-layer + per-feature scores + decision):
     `forge/stage4_review/append_review.py object-sculpt-spec.json --pass-id <pass> --fidelity <0-1> --action <continue|refine-spec|refine-code|request-input|stop> --summary "..." --render-screenshot <shot> --comparison-image cmp.png --ai-vision-score <0-1> --layer-scores-json '{...}' --feature-reviews-json <f.json> --in-place`.
    For the CS2 knife path, also attach the versioned report with
    `--cs2-review-json cs2-review.json --review-scene-json forge/tests/fixtures/knife_review_scene.json`.
    A failed family, painted-region, projection-coverage, critical-detail, or orbit gate blocks
    `continue` even when the global score passes. See `docs/cs2/review-gates.md`.
-10. Sync pipeline state after manual review edits:
-    `forge/stage3_build/orchestrate_passes.py sync object-sculpt-spec.json --in-place`.
+11. Sync pipeline state after manual review edits, record checklist evidence, then re-run the local
+    state gate before another correction or pass:
+    `forge/stage3_build/orchestrate_passes.py sync object-sculpt-spec.json --in-place`
+    `python3 forge/next.py --state .img2threejs/state.json object-sculpt-spec.json`.
+12. Before declaring completion, run
+    `forge/stage4_review/check_part_coverage.py --spec object-sculpt-spec.json --manifest parts.json`
+    and verify the action-ready hierarchy. Mark `part-coverage` and `action-ready` only with evidence.
 
 ## CS2 image-matched rule
 
@@ -151,21 +186,23 @@ The initial CS2 family boundary is **knife only**. Pistol, rifle, SMG, sniper, h
 unknown knife subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not
 receive the knife component tree as a generic fallback.
 
-Full layer contract (what each pipeline layer owns/emits/must-not-decide), the CS2 intake order,
-and the surface/review rule: `grimoire/intake/cs2_intake_contract.md`.
+For every CS2 reconstruction, MUST read the full layer contract, intake order, and surface/review
+rule in `grimoire/intake/cs2_intake_contract.md` before intake state can advance.
 
 ## Gates (do not skip)
 
-Full gate-by-gate contract (Divine Eye, VLM rescue, multi-angle, CS2 knife review, bounded
-correction loop, screenshot feedback, assembly, attachment, material, detail inventory, character
-track): `grimoire/review/gates_reference.md`. In short:
+Before any visual review or `continue` decision, MUST read the full gate-by-gate contract in
+`grimoire/review/gates_reference.md` (Divine Eye, VLM rescue, multi-angle, CS2 review, bounded
+correction, screenshot feedback, assembly, attachment, material, detail inventory, character
+track). In short:
 
 - Validate references first (`grimoire/intake/validation_rubric.md`, `check_reference_admission.py`).
 - `divine_eye.py` is deterministic-first; the VLM (`vlm_gate.py`) is a gated last layer, never
   consulted on a hard-gate failure.
 - A non-planar form must hold from ≥2 angles (`diagnose_render_multi_angle.py`).
 - CS2 knife builds also run `cs2_review.py` against the versioned scene fixture.
-- `correction_loop.py` bounds retries — never a silent infinite burn.
+- Local state enforces 3 corrections per pass and 6 total by default; reaching either limit is a
+  hard stop. `correction_loop.py` may stop earlier on repeated defects, oscillation, or plateau.
 - `continue` requires a render + comparison sheet + AI-vision score ≥ threshold, every critical
   feature ≥ its own threshold (`grimoire/feedback/render_capture.md`).
 - Every model ships explodable AND clickable — a structure gate, not pixels
@@ -179,8 +216,9 @@ track): `grimoire/review/gates_reference.md`. In short:
 
 After every pass, decide exactly one: `continue | refine-spec | refine-code | request-input | stop`.
 `refine-spec` fixes a wrong/missing/shallow spec (re-validate, don't patch code around it);
-`refine-code` fixes geometry/material/lighting that doesn't match a sound spec. Full root-cause
-guide + fidelity scale: `grimoire/review/self_correction.md`.
+`refine-code` fixes geometry/material/lighting that doesn't match a sound spec. Before making the
+decision, MUST read the root-cause guide + fidelity scale in `grimoire/review/self_correction.md`,
+record the decision, and re-run the local state gate.
 
 ## Implementation Rules (brief)
 
