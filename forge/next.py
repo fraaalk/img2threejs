@@ -80,8 +80,7 @@ def main(argv: list[str]) -> int:
         emit_local_state(payload)
         if payload["status"] == "stopped":
             return 3
-        if payload["status"] == "complete" or payload["currentStep"] != "build-current-pass":
-            return 0
+        return 0
 
     emit_status(spec)
     if current == "complete":

@@ -24,6 +24,21 @@ SETUP_STEPS: Final = (
     ("strict-validation", "python3 forge/stage2_spec/validate_sculpt_spec.py {spec} --strict-quality"),
 )
 
+CHARACTER_STEPS: Final = (
+    (
+        "character-contract-read",
+        "Read grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md completely",
+    ),
+    (
+        "character-landmarks",
+        "python3 forge/stage1_intake/extract_landmarks.py {reference} --out anatomy.json --overlay landmarks.png",
+    ),
+    (
+        "character-projection-route",
+        "Record stylized vs maximum-likeness routing; for projection prepare referenceCamera, de-lit albedo, and bake descriptor, otherwise skip with a reason",
+    ),
+)
+
 CS2_STEPS: Final = (
     ("cs2-contract-read", "Read grimoire/intake/cs2_intake_contract.md completely"),
     ("cs2-authoritative-classification", "Obtain an authoritative CS2 family/subtype classification record"),
@@ -31,13 +46,21 @@ CS2_STEPS: Final = (
 )
 
 PASS_STEPS: Final = (
-    ("build-current-pass", "python3 forge/stage3_build/orchestrate_passes.py check {spec} --pass-id {pass_id}"),
+    ("build-current-pass", "python3 forge/stage3_build/generate_threejs_factory.py {spec} --out src/createObjectModel.ts --pass-id {pass_id} --force"),
     ("render-capture", "Render {pass_id} and capture the fixed review view plus meaningful orbit views"),
     ("review-contract-read", "Read grimoire/review/gates_reference.md and grimoire/review/self_correction.md completely"),
     ("tier1-diagnostics", "python3 forge/stage4_review/diagnose_render.py --reference {reference} --render <shot> --spec {spec} --pass-id {pass_id} --in-place"),
     ("multi-angle-review", "python3 forge/stage4_review/diagnose_render_multi_angle.py --reference <fixed-shot> --orbit <orbit-shot> --orbit <orbit-shot>"),
+    ("pass-gate-check", "python3 forge/stage3_build/orchestrate_passes.py check {spec} --pass-id {pass_id}"),
     ("ai-review-recorded", "Create the comparison sheet, inspect it with agent vision, and append exactly one review action"),
     ("pipeline-sync", "python3 forge/stage3_build/orchestrate_passes.py sync {spec} --in-place"),
+)
+
+CS2_PASS_STEPS: Final = (
+    (
+        "cs2-review",
+        "python3 forge/stage4_review/cs2_review.py --manifest cs2-intake.json --metrics cs2-review-inputs.json --scene forge/tests/fixtures/knife_review_scene.json --out cs2-review.json",
+    ),
 )
 
 FINAL_STEPS: Final = (
@@ -77,6 +100,13 @@ def new_state(
     if profile == "cs2":
         insertion = 2
         setup[insertion:insertion] = [_step(*item, scope="setup") for item in CS2_STEPS]
+    elif profile == "character":
+        insertion = 2
+        setup[insertion:insertion] = [_step(*item, scope="setup") for item in CHARACTER_STEPS]
+    pass_steps = list(PASS_STEPS)
+    if profile == "cs2":
+        review_index = next(index for index, item in enumerate(pass_steps) if item[0] == "ai-review-recorded")
+        pass_steps[review_index:review_index] = list(CS2_PASS_STEPS)
     state = {
         "schemaVersion": SCHEMA_VERSION,
         "status": "active",
@@ -84,7 +114,7 @@ def new_state(
         "currentStep": setup[0]["id"],
         "currentPass": "",
         "checklist": setup
-        + [_step(*item, scope="pass") for item in PASS_STEPS]
+        + [_step(*item, scope="pass") for item in pass_steps]
         + [_step(*item, scope="final") for item in FINAL_STEPS],
         "loops": {
             "perPass": {},

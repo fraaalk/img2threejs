@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracking under `.img2threejs/state.json`.
 - Add per-pass and total correction ceilings derived from `reviewHistory`; `forge/next.py` now
   hard-stops when either limit is reached.
+- Add an executable CS2 review CLI and profile-specific CS2/character checklist gates.
 
 ### Changed
 - Keep progressive-disclosure references while making CS2 intake, deterministic review gates,
   self-correction, multi-angle review, part coverage, and action-ready validation explicit router
   requirements.
+- Order each pass as build, render, Tier 1, multi-angle, deterministic pass check, profile review,
+  AI review, and sync.
 
 ## [1.5.0] — 2026-07-28
 

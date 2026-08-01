@@ -36,6 +36,26 @@ class WorkflowStateTest(unittest.TestCase):
         self.assertLess(ids.index("cs2-contract-read"), ids.index("cs2-authoritative-classification"))
         self.assertLess(ids.index("cs2-authoritative-classification"), ids.index("pre-spec-assessment"))
         self.assertLess(ids.index("cs2-manifest"), ids.index("pre-spec-assessment"))
+        self.assertLess(ids.index("pass-gate-check"), ids.index("cs2-review"))
+        self.assertLess(ids.index("cs2-review"), ids.index("ai-review-recorded"))
+
+    def test_character_state_requires_contract_landmarks_and_route_decision(self):
+        state = new_state("character.png", profile="character")
+        ids = [entry["id"] for entry in state["checklist"]]
+        self.assertLess(ids.index("character-contract-read"), ids.index("character-landmarks"))
+        self.assertLess(ids.index("character-landmarks"), ids.index("pre-spec-assessment"))
+        self.assertLess(ids.index("character-projection-route"), ids.index("pre-spec-assessment"))
+
+    def test_pass_commands_follow_executable_gate_order(self):
+        state = new_state("reference.png", spec="spec.json")
+        entries = [entry for entry in state["checklist"] if entry["scope"] == "pass"]
+        ids = [entry["id"] for entry in entries]
+        commands = {entry["id"]: entry["command"] for entry in entries}
+        self.assertIn("generate_threejs_factory.py", commands["build-current-pass"])
+        self.assertIn("--force", commands["build-current-pass"])
+        self.assertLess(ids.index("build-current-pass"), ids.index("tier1-diagnostics"))
+        self.assertLess(ids.index("tier1-diagnostics"), ids.index("pass-gate-check"))
+        self.assertLess(ids.index("pass-gate-check"), ids.index("ai-review-recorded"))
 
     def test_skipping_a_mandatory_step_requires_reason(self):
         state = new_state("reference.png")
@@ -151,6 +171,27 @@ class WorkflowStateTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("LOCAL_STATE status=active step=image-analysis", result.stdout)
             self.assertIn("pending mandatory steps", result.stdout)
+
+    def test_next_cli_emits_only_state_ordered_build_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            spec_path = Path(directory) / "spec.json"
+            state = new_state("reference.png", spec=str(spec_path))
+            setup_ids = [entry["id"] for entry in state["checklist"] if entry["scope"] == "setup"]
+            mark_steps(state, setup_ids, status="done", evidence=["setup.json"])
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            spec_path.write_text(
+                json.dumps({"buildPasses": [{"id": "blockout", "acceptance": []}], "reviewHistory": []}),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "forge" / "next.py"), "--state", str(state_path)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("generate_threejs_factory.py", result.stdout)
+            self.assertNotIn("orchestrate_passes.py check", result.stdout)
 
     def test_next_cli_returns_nonzero_at_loop_ceiling(self):
         with tempfile.TemporaryDirectory() as directory:

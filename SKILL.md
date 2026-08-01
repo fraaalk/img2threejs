@@ -70,6 +70,10 @@ Mark a non-applicable step `skipped` only with `--reason`; silent omission is fo
 are derived from `reviewHistory` actions `refine-spec`/`refine-code`, not agent memory. Defaults are
 3 corrections per pass and 6 total.
 
+Profiles add mandatory gates rather than changing the core order: `cs2` requires classification,
+manifest, and a machine-readable CS2 review before AI review; `character` requires the character
+contracts, landmark evidence, and an explicit stylized-versus-projection route decision.
+
 ## The Loop (scripts do enforcement; agent vision does judgment)
 
 Run scripts from the skill root (`forge/...`). Pure Python 3.10+ stdlib, no pip installs.
@@ -149,8 +153,10 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    local overrides, no micro groups is NOT implementation-ready even if JSON validates).
 6. **Locked build passes** — only touch the currently unlocked pass:
    `forge/stage3_build/orchestrate_passes.py status object-sculpt-spec.json`
-   `forge/stage3_build/generate_threejs_factory.py object-sculpt-spec.json --out src/createObjectModel.ts`
+   `forge/stage3_build/generate_threejs_factory.py object-sculpt-spec.json --out src/createObjectModel.ts --force`
    (generator is pass-gated: a future `--pass-id` fails until prior passes are reviewed `continue`).
+   Before overwriting, carry any valid hand refinement back into the spec; generated code is a
+   reproducible artifact, not the only copy of reconstruction decisions.
 7. Render the current pass in a browser/preview, capture a screenshot at a review viewpoint.
 8. **Run deterministic gates before AI vision.** MUST read
    `grimoire/review/gates_reference.md` and `grimoire/review/self_correction.md` completely. Run
@@ -165,6 +171,8 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
     `forge/stage4_review/append_review.py object-sculpt-spec.json --pass-id <pass> --fidelity <0-1> --action <continue|refine-spec|refine-code|request-input|stop> --summary "..." --render-screenshot <shot> --comparison-image cmp.png --ai-vision-score <0-1> --layer-scores-json '{...}' --feature-reviews-json <f.json> --in-place`.
    For the CS2 knife path, also attach the versioned report with
    `--cs2-review-json cs2-review.json --review-scene-json forge/tests/fixtures/knife_review_scene.json`.
+   Produce that report first with
+   `forge/stage4_review/cs2_review.py --manifest cs2-intake.json --metrics cs2-review-inputs.json --scene forge/tests/fixtures/knife_review_scene.json --out cs2-review.json`.
    A failed family, painted-region, projection-coverage, critical-detail, or orbit gate blocks
    `continue` even when the global score passes. See `docs/cs2/review-gates.md`.
 11. Sync pipeline state after manual review edits, record checklist evidence, then re-run the local

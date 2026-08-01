@@ -20,6 +20,14 @@ The acceptance score always comes from the agent's own vision inspecting the com
 Defaults are 3 `refine-spec`/`refine-code` decisions per pass and 6 total. These are safety limits,
 not targets; stop earlier on success, repeated defects, oscillation, or plateau.
 
+The pass checklist is executable in dependency order: generate, render, Tier 1, multi-angle,
+`orchestrate_passes.py check`, profile-specific review, AI review, then sync. The CS2 profile runs:
+
+`stage4_review/cs2_review.py --manifest cs2-intake.json --metrics cs2-review-inputs.json --scene forge/tests/fixtures/knife_review_scene.json --out cs2-review.json`
+
+The character profile requires the reconstruction/likeness contracts, landmark evidence, and an
+explicit stylized-versus-projection route decision before pre-spec authoring.
+
 ## stage1_intake/probe_image.py
 `stage1_intake/probe_image.py <image>` — image type, dimensions, aspect ratio, obvious technical
 issues. Metadata only; not a substitute for visual inspection.
@@ -57,6 +65,7 @@ threshold (default 0.7), and every critical feature ≥ its own threshold.
 Emits a TypeScript Three.js `Group` factory for the **current unlocked pass only**. Passing a
 future `--pass-id` fails until earlier passes are reviewed `continue`. Output exposes
 `root.userData.sculptRuntime` (nodes/meshes/sockets/colliders/destructionGroups) — hand-refine it.
+Use `--force` for the next pass only after preserving valid hand refinements in the spec.
 
 ## stage4_review/make_comparison_sheet.py
 `stage4_review/make_comparison_sheet.py --reference IMG --render SHOT --out cmp.png [--panel-width N] [--panel-height N] [--gutter N] [--json]`
