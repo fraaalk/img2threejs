@@ -66,6 +66,8 @@ Emits a TypeScript Three.js `Group` factory for the **current unlocked pass only
 future `--pass-id` fails until earlier passes are reviewed `continue`. Output exposes
 `root.userData.sculptRuntime` (nodes/meshes/sockets/colliders/destructionGroups) — hand-refine it.
 Use `--force` for the next pass only after preserving valid hand refinements in the spec.
+Do not regenerate after `refine-code`; edit the existing artifact. Regenerate with `--force` after
+`refine-spec` or when advancing to a new pass.
 
 ## stage4_review/make_comparison_sheet.py
 `stage4_review/make_comparison_sheet.py --reference IMG --render SHOT --out cmp.png [--panel-width N] [--panel-height N] [--gutter N] [--json]`

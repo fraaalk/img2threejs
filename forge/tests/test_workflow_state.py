@@ -52,7 +52,6 @@ class WorkflowStateTest(unittest.TestCase):
         ids = [entry["id"] for entry in entries]
         commands = {entry["id"]: entry["command"] for entry in entries}
         self.assertIn("generate_threejs_factory.py", commands["build-current-pass"])
-        self.assertIn("--force", commands["build-current-pass"])
         self.assertLess(ids.index("build-current-pass"), ids.index("tier1-diagnostics"))
         self.assertLess(ids.index("tier1-diagnostics"), ids.index("pass-gate-check"))
         self.assertLess(ids.index("pass-gate-check"), ids.index("ai-review-recorded"))
@@ -106,12 +105,28 @@ class WorkflowStateTest(unittest.TestCase):
         spec = {"reviewHistory": [{"passId": "blockout", "action": "refine-code"}]}
         sync_from_spec(state, spec, "blockout")
         self.assertEqual(status_payload(state)["currentStep"], "build-current-pass")
+        self.assertIn("do not regenerate", status_payload(state)["nextCommand"])
         self.assertTrue(
             all(entry["status"] == "pending" for entry in state["checklist"] if entry["scope"] == "pass")
         )
         archived = len(state["passHistory"])
         sync_from_spec(state, spec, "blockout")
         self.assertEqual(len(state["passHistory"]), archived)
+
+    def test_new_pass_and_refine_spec_regenerate_with_force(self):
+        state = new_state("reference.png", spec="spec.json")
+        setup_ids = [entry["id"] for entry in state["checklist"] if entry["scope"] == "setup"]
+        mark_steps(state, setup_ids, status="done", evidence=["setup.json"])
+        set_current_pass(state, "blockout")
+        self.assertNotIn("--force", status_payload(state)["nextCommand"])
+        set_current_pass(state, "structural-pass")
+        self.assertIn("--force", status_payload(state)["nextCommand"])
+        sync_from_spec(
+            state,
+            {"reviewHistory": [{"passId": "structural-pass", "action": "refine-spec"}]},
+            "structural-pass",
+        )
+        self.assertIn("--force", status_payload(state)["nextCommand"])
 
     def test_per_pass_refine_limit_is_a_hard_stop(self):
         state = new_state("reference.png", max_per_pass=3, max_total=6)
@@ -192,6 +207,39 @@ class WorkflowStateTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("generate_threejs_factory.py", result.stdout)
             self.assertNotIn("orchestrate_passes.py check", result.stdout)
+
+    def test_next_cli_rejects_a_spec_that_differs_from_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            stored_spec = Path(directory) / "stored.json"
+            other_spec = Path(directory) / "other.json"
+            state_path.write_text(
+                json.dumps(new_state("reference.png", spec=str(stored_spec))),
+                encoding="utf-8",
+            )
+            other_spec.write_text(json.dumps({"buildPasses": []}), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "forge" / "next.py"),
+                    str(other_spec),
+                    "--state",
+                    str(state_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("does not match stored spec", result.stderr)
+
+    def test_state_cli_does_not_expose_manual_pass_bypass(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "forge" / "state.py"), "set-pass", "complete"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid choice", result.stderr)
 
     def test_next_cli_returns_nonzero_at_loop_ceiling(self):
         with tempfile.TemporaryDirectory() as directory:

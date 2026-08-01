@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requirements.
 - Order each pass as build, render, Tier 1, multi-angle, deterministic pass check, profile review,
   AI review, and sync.
+- Make regeneration action-aware so `refine-code` cannot overwrite the artifact it must repair,
+  and reject spec paths that disagree with local state.
 
 ## [1.5.0] — 2026-07-28
 

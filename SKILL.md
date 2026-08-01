@@ -153,10 +153,11 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    local overrides, no micro groups is NOT implementation-ready even if JSON validates).
 6. **Locked build passes** — only touch the currently unlocked pass:
    `forge/stage3_build/orchestrate_passes.py status object-sculpt-spec.json`
-   `forge/stage3_build/generate_threejs_factory.py object-sculpt-spec.json --out src/createObjectModel.ts --force`
+   `forge/stage3_build/generate_threejs_factory.py object-sculpt-spec.json --out src/createObjectModel.ts`
    (generator is pass-gated: a future `--pass-id` fails until prior passes are reviewed `continue`).
-   Before overwriting, carry any valid hand refinement back into the spec; generated code is a
-   reproducible artifact, not the only copy of reconstruction decisions.
+   The local state adds `--force` only for a new pass or `refine-spec`; `refine-code` edits the
+   current artifact without regenerating it. Before overwriting, carry valid hand refinement back
+   into the spec; generated code must not be the only copy of reconstruction decisions.
 7. Render the current pass in a browser/preview, capture a screenshot at a review viewpoint.
 8. **Run deterministic gates before AI vision.** MUST read
    `grimoire/review/gates_reference.md` and `grimoire/review/self_correction.md` completely. Run

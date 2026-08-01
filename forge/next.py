@@ -52,8 +52,17 @@ def main(argv: list[str]) -> int:
         if spec_path is None:
             stored_spec = local_state.get("artifacts", {}).get("spec")
             spec_path = Path(stored_spec) if isinstance(stored_spec, str) and stored_spec else None
-        elif not local_state.get("artifacts", {}).get("spec"):
-            local_state["artifacts"]["spec"] = str(spec_path)
+        else:
+            stored_spec = local_state.get("artifacts", {}).get("spec")
+            if isinstance(stored_spec, str) and stored_spec:
+                if Path(stored_spec).expanduser().resolve() != spec_path.expanduser().resolve():
+                    print(
+                        f"state error: positional spec {spec_path} does not match stored spec {stored_spec}",
+                        file=sys.stderr,
+                    )
+                    return 2
+            else:
+                local_state["artifacts"]["spec"] = str(spec_path)
 
     if spec_path is None:
         if local_state is None:

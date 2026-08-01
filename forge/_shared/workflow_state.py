@@ -46,7 +46,7 @@ CS2_STEPS: Final = (
 )
 
 PASS_STEPS: Final = (
-    ("build-current-pass", "python3 forge/stage3_build/generate_threejs_factory.py {spec} --out src/createObjectModel.ts --pass-id {pass_id} --force"),
+    ("build-current-pass", "python3 forge/stage3_build/generate_threejs_factory.py {spec} --out src/createObjectModel.ts --pass-id {pass_id}"),
     ("render-capture", "Render {pass_id} and capture the fixed review view plus meaningful orbit views"),
     ("review-contract-read", "Read grimoire/review/gates_reference.md and grimoire/review/self_correction.md completely"),
     ("tier1-diagnostics", "python3 forge/stage4_review/diagnose_render.py --reference {reference} --render <shot> --spec {spec} --pass-id {pass_id} --in-place"),
@@ -125,6 +125,7 @@ def new_state(
         "artifacts": {"reference": reference, "spec": spec},
         "passHistory": [],
         "reviewCursor": 0,
+        "iterationAction": "initial",
         "stopReason": "",
     }
     recompute(state)
@@ -205,8 +206,15 @@ def _pending(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [entry for entry in entries if entry["status"] == "pending"]
 
 
-def _format_command(state: dict[str, Any], command: str) -> str:
+def _format_command(state: dict[str, Any], entry: dict[str, Any]) -> str:
     artifacts = state.get("artifacts", {})
+    command = str(entry["command"])
+    if entry["id"] == "build-current-pass":
+        action = state.get("iterationAction")
+        if action == "refine-code":
+            return "Refine the existing src/createObjectModel.ts from the latest review; do not regenerate it"
+        if action in {"new-pass", "refine-spec"}:
+            command += " --force"
     return command.format(
         reference=shlex.quote(str(artifacts.get("reference") or "<reference>")),
         spec=shlex.quote(str(artifacts.get("spec") or "<spec>")),
@@ -305,6 +313,7 @@ def set_current_pass(state: dict[str, Any], pass_id: str) -> None:
             entry["status"] = "pending"
             entry["evidence"] = []
             entry["reason"] = ""
+        state["iterationAction"] = "new-pass" if previous else "initial"
     state["currentPass"] = normalized
     recompute(state)
 
@@ -316,12 +325,14 @@ def sync_from_spec(state: dict[str, Any], spec: dict[str, Any], current_pass: st
         history = []
     review_cursor = min(int(state.get("reviewCursor", 0)), len(history))
     new_reviews = history[review_cursor:]
-    if current_pass != "complete" and any(
-        isinstance(entry, dict)
+    refinements = [
+        entry
+        for entry in new_reviews
+        if isinstance(entry, dict)
         and entry.get("passId") == current_pass
         and entry.get("action") in REFINE_ACTIONS
-        for entry in new_reviews
-    ):
+    ]
+    if current_pass != "complete" and refinements:
         state.setdefault("passHistory", []).append(
             {
                 "passId": current_pass,
@@ -333,6 +344,7 @@ def sync_from_spec(state: dict[str, Any], spec: dict[str, Any], current_pass: st
             checklist_entry["status"] = "pending"
             checklist_entry["evidence"] = []
             checklist_entry["reason"] = ""
+        state["iterationAction"] = refinements[-1]["action"]
     state["reviewCursor"] = len(history)
     per_pass: dict[str, int] = {}
     total = 0
@@ -375,7 +387,7 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
             "totalCount": loops["total"],
             "maxTotal": loops["maxTotal"],
         },
-        "nextCommand": None if state["status"] != "active" or entry is None else _format_command(state, entry["command"]),
+        "nextCommand": None if state["status"] != "active" or entry is None else _format_command(state, entry),
         "stopReason": state.get("stopReason") or None,
         "pending": [
             entry["id"]
