@@ -41,6 +41,10 @@ nearby object's component tree. The adapter is a reconstruction contract, not pe
 invent hidden detail. Read `grimoire/intake/adaptive_adapter.md` and
 `grimoire/intake/research_evidence.md` whenever the subject has no existing domain template.
 
+Every reconstruction has an explicit artifact root and loop budget. The default artifact root is
+`.img2threejs/`; the user's explicit loop budget overrides the generic defaults. For the AWP
+reconstruction, set both `maxPerPass` and `maxTotal` to `20` and carry those values into state.
+
 State explicitly when output is approximate/stylized/low-poly. A single image cannot reveal
 hidden sides or guarantee exact geometry — say so instead of faking confidence.
 
@@ -63,7 +67,12 @@ Full rule + examples: `grimoire/review/self_correction.md`.
 Conversation context is disposable; `.img2threejs/state.json` is the local checklist authority.
 Initialize it once per reconstruction:
 
-`python3 forge/state.py init --state .img2threejs/state.json --reference <img> --profile <generic|cs2|character>`
+`python3 forge/state.py init --state .img2threejs/state.json --reference <img> --profile <generic|cs2|character> --max-per-pass <n> --max-total <n>`
+
+Use `--max-per-pass 20 --max-total 20` for the AWP task. Never silently fall back to the
+skill's default `3/6` when the task or state explicitly declares another budget. Record the
+artifact root in `state.artifacts.root` and keep generated evidence under that root. Read
+`grimoire/intake/artifact_storage.md` before creating outputs.
 
 At every fresh start, resume, or correction loop, run
 `python3 forge/next.py --state .img2threejs/state.json [object-sculpt-spec.json]` before touching
@@ -192,10 +201,11 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    `forge/stage3_build/orchestrate_passes.py check object-sculpt-spec.json --pass-id <pass>`. Also
    run the no-cheat geometry/attachment checks; a passing AABB or metadata check alone does not
    prove visual contact or true 3D form.
-9. Package one side-by-side sheet, then inspect it with agent vision:
-   `forge/stage4_review/make_comparison_sheet.py --reference <img> --render <shot> --out cmp.png --json`.
-10. Record the review (overall + per-layer + per-feature scores + decision):
-    `forge/stage4_review/append_review.py object-sculpt-spec.json --pass-id <pass> --fidelity <0-1> --action <continue|refine-spec|refine-code|request-input|stop> --summary "..." --render-screenshot <shot> --comparison-image cmp.png --ai-vision-score <0-1> --layer-scores-json '{...}' --feature-reviews-json <f.json> --in-place`.
+9. Package one side-by-side sheet under `.img2threejs/`, then inspect it with agent vision:
+   `forge/stage4_review/make_comparison_sheet.py --reference <img> --render <shot> --out .img2threejs/reviews/<pass>/comparison.png --json`.
+10. Record the review (overall + per-layer + per-feature scores + decision) in the spec/evidence
+    under `.img2threejs/`:
+    `forge/stage4_review/append_review.py object-sculpt-spec.json --pass-id <pass> --fidelity <0-1> --action <continue|refine-spec|refine-code|request-input|stop> --summary "..." --render-screenshot .img2threejs/renders/<pass>.png --comparison-image .img2threejs/reviews/<pass>/comparison.png --ai-vision-score <0-1> --layer-scores-json '{...}' --feature-reviews-json .img2threejs/reviews/<pass>/features.json --in-place`.
    For the CS2 knife path, also attach the versioned report with
    `--cs2-review-json cs2-review.json --review-scene-json forge/tests/fixtures/knife_review_scene.json`.
    Produce that report first with
@@ -209,6 +219,19 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
 12. Before declaring completion, run
     `forge/stage4_review/check_part_coverage.py --spec object-sculpt-spec.json --manifest parts.json`
     and verify the action-ready hierarchy. Mark `part-coverage` and `action-ready` only with evidence.
+
+## Artifact and loop rule
+
+Generated images and information belong in `.img2threejs/` beside `state.json`: renders, crops,
+comparison sheets, orbit audits, manifests, review JSON, research notes, confidence ledgers,
+diagnostic reports, and NotebookLM exports. Use stable subfolders such as `renders/`, `reviews/`,
+`audit/`, `research/`, and `manifests/`. Do not write generated evidence into `src/`, a demo's
+`review/` directory, or an arbitrary temporary folder. Keep source code, committed skill assets,
+and the user-provided original reference paths outside this rule; record their paths in state.
+
+The loop budget is a task contract, not a license to bypass gates. A loop may be spent only after a
+recorded review action and state sync. Do not advance a pass because the budget remains; do not stop
+early merely because the generic default is smaller than the explicit task budget.
 
 ## Generic image-matched rule
 
