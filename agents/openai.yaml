@@ -1,0 +1,4 @@
+interface:
+  display_name: "img2threejs"
+  short_description: "Rebuild references as procedural Three.js models"
+  default_prompt: "Use $img2threejs to reconstruct this reference as a quality-gated procedural Three.js model. If the user supplies a GLB, use the explicit GLB-mediated reference route: probe/hash it, render a fresh GLB baseline through the target Three.js browser route, then generate a separate procedural TypeScript factory and compare both with the same camera batch. Initialize forge/state.py for resumable multi-session work, analyze every visible material region against docs/materials/material-reference.json, route optional mask, landmark, depth, browser, and documentation tools only when they strengthen evidence, and keep the generated source plus deterministic gates authoritative."
