@@ -9,11 +9,12 @@
 Quality-gated, animation-ready, and deliberately token-efficient — reconstruction-by-code, not photogrammetry, mesh extraction, or downloaded art packs.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.3-green.svg)](https://github.com/img2threejs/img2threejs/releases)
+[![Version](https://img.shields.io/badge/version-1.4.4-green.svg)](CHANGELOG.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Runtime](https://img.shields.io/badge/runtime-Three.js-000000.svg)](https://threejs.org)
-[![Tooling](https://img.shields.io/badge/tooling-Python%203.10%2B%20stdlib-3776ab.svg)](scripts)
+[![Tooling](https://img.shields.io/badge/tooling-Python%203.10%2B%20stdlib-3776ab.svg)](forge)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Buy%20Me%20A%20Coffee-FFDD00.svg?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/hoainhowors)
+[![Scripts](https://img.shields.io/badge/scripts-forge%20%2F%20scripts-3776ab.svg)](scripts)
 
 <table align="center">
   <tr>
@@ -75,12 +76,19 @@ It runs under Claude Code, Codex, or OpenCode. It is agent-agnostic: wherever th
 - **Objects and characters.** Each subject is classified `object`, `character`, or `hybrid`. Objects follow the hard-surface pipeline; characters route through an anatomy-aware track (head-unit proportions, facial landmarks, pose) documented in `grimoire/character/reconstruction.md`.
 - **Detail-first analysis.** Before code generation the pipeline enumerates a `detailInventory` of identity-defining small details (gloss, bevel/rounding, screws/rivets, engraved or painted linework, contours, stains and wear). Every detail must map to a real component or material entry, and a strict-quality gate blocks generation until the inventory is complete. Taxonomy: `grimoire/intake/detail_inventory.md`.
 - **Maximum likeness for a specific person or character.** An opt-in projection-first path fits a parametric template to image landmarks, de-lights the photo, camera-matches the render, and projects the reference onto the mesh. A single image cannot guarantee 100 percent likeness, so the pipeline reports per-region confidence and asks for more views when it matters. Details: `grimoire/character/likeness_maximization.md`.
+- **Multi-view silhouette carving.** An opt-in `geometryDescriptor.visualHull` intersects at least two deterministic orthographic binary silhouettes into a bounded, welded voxel mesh. It records unseen areas as low-confidence rather than inventing hidden detail. Schema and runtime check: `grimoire/scripts.md`.
 - **CS2 weapon review gates.** Knife and Glock-18 routes use family-specific component contracts. The review records exactness tier, family identity, painted-region and projection coverage, per-region confidence, approximation notes, and versioned review-scene metadata; component-coverage and map-stripped blockout gates prevent a convincing texture from standing in for real structure. See [`docs/cs2/review-gates.md`](docs/cs2/review-gates.md).
+- **Resumable local workflow.** `forge/state.py` records an ordered, evidence-backed intake/pass checklist for generic, character, and CS2 profiles. `forge/next.py --state` resumes from that checklist while the existing spec, render, and review gates remain authoritative.
+- **Material reference pipeline.** Every visible material region can be cropped, analyzed, resolved against the versioned Three.js material registry, fitted into `ObjectSculptSpec`, rendered from controlled camera views, and accepted only after a per-region comparison gate. See [`docs/materials/README.md`](docs/materials/README.md).
+- **Python-assisted browser rendering.** Python may orchestrate camera batches, hashes, manifests, and deterministic diagnostics, but the target browser Three.js route remains the rendering authority. See [`docs/research/python-threejs-character-rendering.md`](docs/research/python-threejs-character-rendering.md).
 
 ---
 
 ## How it works
 
+A staged sculpting pipeline turns the reference image into a spec, then generates and vision-reviews one build pass at a time — `blockout → structural → form → material → surface → lighting → interaction → optimization` — self-correcting until every identity-defining feature clears its threshold.
+
+**→ Full pipeline diagram, gates, self-correction logic, and the token-efficiency design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 A staged sculpting pipeline turns the reference image into a spec, then generates and vision-reviews one build pass at a time — `blockout → structural → form → material → surface → lighting → interaction → optimization` — self-correcting until every identity-defining feature clears its threshold. Deterministic Python scripts handle validation and gating; model tokens are spent only on visual judgment and code.
 
 **→ Full pipeline diagram, gates, self-correction logic, script reference, and the token-efficiency design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -95,6 +103,15 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
    git clone https://github.com/img2threejs/img2threejs.git ~/.claude/skills/img2threejs
    ```
 
+   The canonical shared checkout for this workspace is
+   `/Users/nhonh/Documents/personal/img2threejs`. Keep both host entrypoints pointed at that
+   checkout as symlinks:
+
+   ```text
+   ~/.claude/skills/img2threejs -> /Users/nhonh/Documents/personal/img2threejs
+   ~/.codex/skills/img2threejs  -> /Users/nhonh/Documents/personal/img2threejs
+   ```
+
 2. **Invoke** — in Claude Code, attach or point to an object image and run:
 
    ```
@@ -104,6 +121,13 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
    That is enough: the skill classifies the subject, runs the detail inventory, and gates every pass on its own.
 
 3. **Follow the pipeline** — the skill validates the image, writes an assessment and spec, generates the factory pass by pass, and shows you a side-by-side comparison at each step until the render matches.
+
+   For a multi-session reconstruction, create a local state index first:
+
+   ```bash
+   python3 forge/state.py init --reference <image> --profile character --spec object-sculpt-spec.json
+   python3 forge/next.py --state .img2threejs/state.json
+   ```
 
 ### Driving it harder
 
@@ -141,6 +165,74 @@ python3 forge/stage2_spec/validate_sculpt_spec.py spec.json --strict-quality
 python3 forge/stage3_build/generate_threejs_factory.py spec.json --out src/createObjectModel.ts
 ```
 
+The factory generator repeats the strict-quality gate and is fail-closed: on failure it returns
+`BLOCKED` with the spec artifact, failure metrics, causes, and next action, and does not write a
+factory. `--allow-nonstrict` is only for explicit legacy test fixtures, never production output.
+
+For the script-by-script reference, the full scripts table, and expected artifacts, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
+## Why it is token-efficient
+
+Most image-to-3D agent loops burn tokens by asking the model to do mechanical work — re-reading the whole model every pass, scoring pixels, validating JSON by hand, re-running steps it already did. img2threejs pushes all of that into deterministic scripts and spends model tokens only where judgment is actually required.
+
+- **Scripts enforce, the model judges.** The Python scripts handle validation, gating, spec authoring, PBR extraction, comparison-sheet packaging, and pipeline state. They never score visuals. The model's tokens go to one thing: looking at a single side-by-side sheet and deciding pass or fail.
+- **Zero dependencies, zero install churn.** Every script is pure Python 3.10+ standard library. No pip, no PIL, no numpy, no Playwright. PNG read/write is done with `struct` and `zlib`. Nothing to install means nothing to debug in-context.
+- **Pass-gated generation.** The code generator emits only the currently unlocked build pass. The model does not regenerate or re-read the entire model on every iteration — each step is small and scoped.
+- **Fail fast, before codegen.** A strict-quality gate blocks shallow specs before a single line of Three.js is generated, so you never spend tokens rendering a model that was underspecified from the start.
+- **One image per review.** Each pass is judged from exactly one packaged comparison sheet (reference beside render), not a scattering of screenshots.
+- **Text output, not binaries.** The result is diffable TypeScript plus a JSON spec — small, reviewable, and version-controllable, instead of multi-megabyte mesh files.
+
+The net effect: you still get a faithful 3D model from an image, but the expensive model context is reserved for visual judgment and code, not bookkeeping. For the full per-stage and per-cycle token breakdown, see [docs/TOKEN_COST.md](docs/TOKEN_COST.md).
+
+---
+
+## Scripts
+
+| Script | Role |
+| --- | --- |
+| `stage1_intake/probe_image.py` | Image metadata and obvious technical issues (not a visual check). |
+| `stage2_spec/new_pre_spec_assessment.py` | Classify the object, score complexity, emit a quality contract. |
+| `stage2_spec/new_sculpt_spec.py` | Author the ObjectSculptSpec from the assessment. |
+| `stage2_spec/validate_sculpt_spec.py` | Validate the spec; `--strict-quality` blocks shallow specs before codegen. |
+| `stage1_intake/extract_pbr_evidence.py` | Reference-derived PBR evidence per crop (inference, not inverse rendering). |
+| `stage1_intake/material_region_analysis.py` | Crop material regions, run texture/PBR evidence, and resolve registry profiles. |
+| `stage2_spec/apply_material_analysis.py` | Wire region assignments, priors, maps, and provenance into ObjectSculptSpec. |
+| `stage3_build/orchestrate_passes.py` | Locked pass state: status, check, sync. |
+| `stage3_build/generate_threejs_factory.py` | Emit the Three.js `Group` factory for the current unlocked pass. |
+| `stage4_review/material_views.py` | Emit multi-angle, zoomed, microscope, environment, and capture-readback contracts. |
+| `stage4_review/material_comparator.py` | Compare the visible material crop and classify per-channel mismatches. |
+| `stage4_review/material_feedback.py` | Apply bounded, material-scoped corrections through the existing stop policy. |
+| `stage4_review/material_gate.py` | Block material-pass until registry, crop, render, compatibility, and comparison evidence passes. |
+| `stage4_review/make_comparison_sheet.py` | Package one reference-vs-render sheet for review. |
+| `stage4_review/append_review.py` | Record a per-pass review: scores, decision, evidence. |
+| `stage4_review/cs2_review.py` | Evaluate the blocking CS2 knife review contract and versioned scene thresholds. |
+| `_shared/feature_acceptance_policy.py` | Internal helper enforcing per-feature score thresholds. |
+| `stage1_intake/build_detail_inventory.py` | Slice the reference into zones and scaffold a detail inventory. |
+| `stage1_intake/extract_landmarks.py` | Overlay a landmark grid and scaffold an anatomy block for characters. |
+| `stage1_intake/solve_camera_pose.py` | Emit a reference-camera block so the render can be camera-matched. |
+| `stage1_intake/delight_albedo.py` | Approximate a neutral albedo from the photo before texture projection. |
+| `stage3_build/bake_projected_texture.py` | Emit a projection/UV-bake descriptor for photo-texture projection. |
+
+The `grimoire/` folder holds the detailed rubrics each gate applies (validation, pre-spec assessment, procedural patterns, material and lighting realism, attachment correctness, action-ready models, self-correction).
+
+### Optional reference-fidelity tooling
+
+The stdlib-only core can use an isolated evidence layer without taking on runtime dependencies:
+SAM2 component masks, Depth Anything V2 relative-depth priors, MediaPipe face/pose landmarks,
+Chrome DevTools diagnostics, Three.js scene inspection, Playwright cross-browser fallback, and
+version-aware Context7 retrieval. These tools never approve a pass or silently provide geometry.
+Install, routing, provenance rules and exact commands:
+[`docs/integrations/reference_fidelity_tooling.md`](docs/integrations/reference_fidelity_tooling.md).
+
+---
+
+## What you get
+
+- An `ObjectSculptSpec` JSON: the full component tree, materials, repetition systems, sockets, and a recorded review history for every pass.
+- A TypeScript `createObjectNameModel(spec, options)` factory returning a `THREE.Group`, with `root.userData.sculptRuntime` exposing nodes, sockets, colliders, and destruction groups.
+- A render plus comparison sheets documenting the fidelity at each pass.
 For the script-by-script reference and the full list of output artifacts, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
@@ -198,6 +290,7 @@ img2threejs is free and open source. If it saved you time or found its way into 
 
 <a href="https://www.buymeacoffee.com/hoainhowors" target="_blank" rel="noopener noreferrer"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
+VietQR / MoMo / PayPal also work — see the [donate page](https://hoainho.github.io/img2threejs-showcase/donate.html).
 VietQR / MoMo / PayPal also work — see the [donate page](https://img2threejs.github.io/img2threejs-showcase/donate.html).
 
 ---
