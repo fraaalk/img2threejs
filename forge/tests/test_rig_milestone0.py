@@ -33,14 +33,30 @@ from pathlib import Path
 FORGE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(FORGE_ROOT))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from showcase_test_support import showcase_root  # noqa: E402
 from stage5_rig.emit_rig import emit_typescript  # noqa: E402
 from stage5_rig.rig_spec import BoneSpec, RigSpec  # noqa: E402
 
-# Showcase checkout that owns `three` and the reference rig this milestone
-# was benchmarked against (createRiggedDragon.ts). Not vendored into forge —
-# see the team's ownership constraint: this test only reads from it.
-SHOWCASE_ROOT = Path("/Users/nhonh/Documents/personal/img2threejs-showcase")
-GATE_SCRIPT = SHOWCASE_ROOT / "scripts" / "rig-milestone0.mjs"
+
+def resolve_gate() -> tuple[str, Path, Path]:
+    """Locate `node` and the showcase gate script, or skip.
+
+    The showcase checkout owns `three` and the reference rig this milestone was benchmarked
+    against; it is deliberately not vendored into forge, and this test only reads from it. Its
+    location comes from IMG2THREEJS_SHOWCASE_ROOT like every other showcase-backed test — an
+    absolute path here passes on one machine and errors out on every other one, CI included.
+    `showcase_root()` still fails closed rather than skipping when IMG2THREEJS_REQUIRE_SHOWCASE=1.
+    """
+    root = showcase_root()
+    gate = root / "scripts" / "rig-milestone0.mjs"
+    if not gate.exists():
+        raise unittest.SkipTest(f"showcase checkout has no rig gate script at {gate}")
+    node = shutil.which("node")
+    if node is None:
+        raise unittest.SkipTest("executing the emitted rig needs `node` on PATH")
+    return node, gate, root
 
 # --- Gate thresholds (Milestone 0 brief) --------------------------------
 # (a) calibration reference: the hand-authored dragon achieves 2.98e-8.
@@ -117,11 +133,7 @@ class RigMilestone0(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        node = shutil.which("node")
-        if node is None:
-            raise RuntimeError("FAIL CLOSED: no `node` on PATH — cannot execute the emitted rig")
-        if not GATE_SCRIPT.exists():
-            raise RuntimeError(f"FAIL CLOSED: gate script not found at {GATE_SCRIPT}")
+        node, gate_script, showcase = resolve_gate()
 
         spec = build_three_bone_arm_spec()
         source = emit_typescript(spec, COMPONENT_EXTENTS, CAPSULE_RADIUS)
@@ -134,8 +146,8 @@ class RigMilestone0(unittest.TestCase):
         cls.out_path = out_path
 
         proc = subprocess.run(
-            [node, str(GATE_SCRIPT), str(entry_path), "--out", str(out_path)],
-            cwd=str(SHOWCASE_ROOT),
+            [node, str(gate_script), str(entry_path), "--out", str(out_path)],
+            cwd=str(showcase),
             capture_output=True,
             text=True,
             timeout=120,
@@ -287,19 +299,15 @@ class AxisExemptionSelfCheck(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        node = shutil.which("node")
-        if node is None:
-            raise RuntimeError("FAIL CLOSED: no `node` on PATH — cannot run --self-check")
-        if not GATE_SCRIPT.exists():
-            raise RuntimeError(f"FAIL CLOSED: gate script not found at {GATE_SCRIPT}")
+        node, gate_script, showcase = resolve_gate()
 
         cls._tempdir = tempfile.mkdtemp(prefix="rig-milestone0-selfcheck-")
         out_path = Path(cls._tempdir) / "self-check.json"
         cls.out_path = out_path
 
         proc = subprocess.run(
-            [node, str(GATE_SCRIPT), "--self-check", "--out", str(out_path)],
-            cwd=str(SHOWCASE_ROOT),
+            [node, str(gate_script), "--self-check", "--out", str(out_path)],
+            cwd=str(showcase),
             capture_output=True,
             text=True,
             timeout=60,
