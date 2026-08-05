@@ -227,7 +227,7 @@
   "materials": [
     {
       "id": "skin.human",
-      "aliases": ["skin", "human skin", "da người"],
+      "aliases": ["skin", "human skin"],
       "family": "skin",
       "subtype": "human",
       "finish": "natural",
@@ -250,7 +250,7 @@
     },
     {
       "id": "hair.human",
-      "aliases": ["hair", "human hair", "tóc"],
+      "aliases": ["hair", "human hair"],
       "family": "hair",
       "subtype": "human",
       "finish": "strand-directional",
@@ -272,7 +272,7 @@
     },
     {
       "id": "fur.stylized",
-      "aliases": ["fur", "animal fur", "lông thú"],
+      "aliases": ["fur", "animal fur"],
       "family": "fur",
       "subtype": "stylized",
       "finish": "fibre-matte",
@@ -294,7 +294,7 @@
     },
     {
       "id": "fabric.woven-matte",
-      "aliases": ["fabric", "cloth", "cotton", "linen", "vải", "vải cotton"],
+      "aliases": ["fabric", "cloth", "cotton", "linen"],
       "family": "fabric",
       "subtype": "woven",
       "finish": "matte",
@@ -316,7 +316,7 @@
     },
     {
       "id": "fabric.silk-satin",
-      "aliases": ["silk", "satin", "lụa", "sa tanh"],
+      "aliases": ["silk", "satin"],
       "family": "fabric",
       "subtype": "silk-satin",
       "finish": "smooth-directional",
@@ -361,7 +361,7 @@
     },
     {
       "id": "leather.matte",
-      "aliases": ["leather", "matte leather", "da thuộc"],
+      "aliases": ["leather", "matte leather"],
       "family": "leather",
       "subtype": "natural-or-synthetic",
       "finish": "matte-worn",
@@ -383,7 +383,7 @@
     },
     {
       "id": "metal.steel-polished",
-      "aliases": ["polished steel", "chrome", "stainless steel", "thép bóng", "crôm"],
+      "aliases": ["polished steel", "chrome", "stainless steel"],
       "family": "metal",
       "subtype": "steel",
       "finish": "polished",
@@ -404,7 +404,7 @@
     },
     {
       "id": "metal.steel-brushed",
-      "aliases": ["brushed steel", "machined steel", "thép xước"],
+      "aliases": ["brushed steel", "machined steel"],
       "family": "metal",
       "subtype": "steel",
       "finish": "brushed",
@@ -425,7 +425,7 @@
     },
     {
       "id": "metal.aluminum",
-      "aliases": ["aluminum", "aluminium", "nhôm"],
+      "aliases": ["aluminum", "aluminium"],
       "family": "metal",
       "subtype": "aluminum",
       "finish": "satin",
@@ -446,7 +446,7 @@
     },
     {
       "id": "metal.copper",
-      "aliases": ["copper", "đồng đỏ"],
+      "aliases": ["copper"],
       "family": "metal",
       "subtype": "copper",
       "finish": "polished-or-aged",
@@ -466,7 +466,7 @@
     },
     {
       "id": "metal.brass",
-      "aliases": ["brass", "bronze", "đồng thau", "đồng vàng"],
+      "aliases": ["brass", "bronze"],
       "family": "metal",
       "subtype": "brass-bronze",
       "finish": "polished-or-aged",
@@ -486,7 +486,7 @@
     },
     {
       "id": "metal.gold",
-      "aliases": ["gold", "vàng kim loại"],
+      "aliases": ["gold"],
       "family": "metal",
       "subtype": "gold",
       "finish": "polished",
@@ -506,7 +506,7 @@
     },
     {
       "id": "coating.painted-metal",
-      "aliases": ["painted metal", "coated metal", "sơn kim loại"],
+      "aliases": ["painted metal", "coated metal"],
       "family": "coating",
       "subtype": "paint-over-metal",
       "finish": "gloss-or-satin",
@@ -529,7 +529,7 @@
     },
     {
       "id": "plastic.glossy",
-      "aliases": ["glossy plastic", "acrylic", "nhựa bóng"],
+      "aliases": ["glossy plastic", "acrylic"],
       "family": "plastic",
       "subtype": "generic-polymer",
       "finish": "glossy",
@@ -552,7 +552,7 @@
     },
     {
       "id": "plastic.matte",
-      "aliases": ["matte plastic", "polymer", "nhựa mờ"],
+      "aliases": ["matte plastic", "polymer"],
       "family": "plastic",
       "subtype": "generic-polymer",
       "finish": "matte",
@@ -594,7 +594,7 @@
     },
     {
       "id": "wood.unfinished",
-      "aliases": ["wood", "raw wood", "gỗ"],
+      "aliases": ["wood", "raw wood"],
       "family": "wood",
       "subtype": "generic",
       "finish": "unfinished",
@@ -615,7 +615,7 @@
     },
     {
       "id": "wood.varnished",
-      "aliases": ["varnished wood", "lacquered wood", "gỗ phủ bóng"],
+      "aliases": ["varnished wood", "lacquered wood"],
       "family": "wood",
       "subtype": "generic",
       "finish": "varnished",
@@ -638,7 +638,7 @@
     },
     {
       "id": "stone.natural",
-      "aliases": ["stone", "rock", "granite", "marble", "đá"],
+      "aliases": ["stone", "rock", "granite", "marble"],
       "family": "stone",
       "subtype": "natural",
       "finish": "rough-or-polished",
@@ -659,7 +659,7 @@
     },
     {
       "id": "ceramic.glazed",
-      "aliases": ["ceramic", "porcelain", "glazed ceramic", "gốm", "sứ"],
+      "aliases": ["ceramic", "porcelain", "glazed ceramic"],
       "family": "ceramic",
       "subtype": "glazed",
       "finish": "glossy",
@@ -682,7 +682,7 @@
     },
     {
       "id": "glass.clear",
-      "aliases": ["glass", "clear glass", "kính trong"],
+      "aliases": ["glass", "clear glass"],
       "family": "glass",
       "subtype": "clear",
       "finish": "polished",
@@ -704,7 +704,7 @@
     },
     {
       "id": "glass.frosted",
-      "aliases": ["frosted glass", "etched glass", "kính mờ"],
+      "aliases": ["frosted glass", "etched glass"],
       "family": "glass",
       "subtype": "frosted",
       "finish": "rough-transmissive",
@@ -726,7 +726,7 @@
     },
     {
       "id": "gemstone.quartz",
-      "aliases": ["quartz", "crystal", "gemstone", "thạch anh", "pha lê"],
+      "aliases": ["quartz", "crystal", "gemstone"],
       "family": "gemstone",
       "subtype": "quartz-like",
       "finish": "polished",

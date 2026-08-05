@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Divine Eye (đôi mắt thần) — deterministic multi-signal render↔reference evaluator.
+"""The Divine Eye — deterministic multi-signal render↔reference evaluator.
 
 Plan 1.3 Phase 3 core (§3.1 ensemble, §3.3 combination + self-uncertainty). This is
 the single authority the correction loop asks "how close is this render to the
