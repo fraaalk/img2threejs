@@ -103,13 +103,12 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
    git clone https://github.com/img2threejs/img2threejs.git ~/.claude/skills/img2threejs
    ```
 
-   The canonical shared checkout for this workspace is
-   `/Users/nhonh/Documents/personal/img2threejs`. Keep both host entrypoints pointed at that
-   checkout as symlinks:
+   If you use more than one host, keep a single checkout and point each entrypoint at it as a
+   symlink, so they cannot drift apart:
 
    ```text
-   ~/.claude/skills/img2threejs -> /Users/nhonh/Documents/personal/img2threejs
-   ~/.codex/skills/img2threejs  -> /Users/nhonh/Documents/personal/img2threejs
+   ~/.claude/skills/img2threejs -> <your checkout>
+   ~/.codex/skills/img2threejs  -> <your checkout>
    ```
 
 2. **Invoke** — in Claude Code, attach or point to an object image and run:

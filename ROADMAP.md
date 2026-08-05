@@ -4,10 +4,6 @@ Where img2threejs is going: from rebuilding one object at a time to generating w
 worlds from reference images. For the full technical specification and acceptance criteria of
 in-flight work, see [docs/UPGRADE_PLAN.md](docs/UPGRADE_PLAN.md).
 
-The canonical shared checkout is `/Users/nhonh/Documents/personal/img2threejs`. Claude and Codex
-entrypoints should be symlinks to it at `~/.claude/skills/img2threejs` and
-`~/.codex/skills/img2threejs`.
-
 Each release has one theme. That is deliberate — a version people can name is a version people
 can plan around.
 

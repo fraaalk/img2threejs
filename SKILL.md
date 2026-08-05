@@ -17,12 +17,12 @@ browser MCP (playwright/chrome-devtools), the project preview, or a user-supplie
 
 ## Canonical shared checkout
 
-The canonical shared repository is `/Users/nhonh/Documents/personal/img2threejs`. Claude and
-Codex should enter it through these symlinks so both hosts execute the same checkout:
+Keep one checkout of this repository and let every host enter it through a symlink, so Claude and
+Codex execute the same code instead of drifting apart:
 
 ```text
-~/.claude/skills/img2threejs -> /Users/nhonh/Documents/personal/img2threejs
-~/.codex/skills/img2threejs  -> /Users/nhonh/Documents/personal/img2threejs
+~/.claude/skills/img2threejs -> <your checkout>
+~/.codex/skills/img2threejs  -> <your checkout>
 ```
 
 ## When To Use
