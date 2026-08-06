@@ -36,6 +36,8 @@ integrations/vision/.venv/
 # so `assets/` + `!assets/logo.svg` would silently not work.
 assets/*
 !assets/logo.svg
+# Sponsor brand marks are referenced by the README, so they ship too.
+!assets/sponsors/
 openspec/
 runtime/
 
