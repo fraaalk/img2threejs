@@ -1,7 +1,6 @@
 # Procedural rigging contract — 1.5-alpha
 
-This is the implementation-facing companion to
-`docs/research/unirig-skeleton-skinning-distillation.md`.
+The implementation-facing rig contract: what the payload owns, and what it deliberately does not.
 
 ## Payload ownership
 

@@ -109,9 +109,8 @@ Before any factory edit:
    accessory → materials → lighting`. Recapture the full pass set after each group and record
    the changed group, hashes and score. Never combine groups when diagnosing improvement.
 
-The machine-readable contract and research distillation live in
-`docs/specs/render-profile.v2.schema.json`, `docs/specs/render-profile.v2.example.json`, and
-`docs/research/img2threejs-glb-mediated-v2-distill.md`. The executable manifest bridge accepts
+The machine-readable contract lives in `docs/specs/render-profile.v2.schema.json` and
+`docs/specs/render-profile.v2.example.json`. The executable manifest bridge accepts
 `--render-profile` and exposes `record-pass`; its `glb-mediated-v2` validation is fail-closed.
 
 ## Required Inputs
@@ -494,8 +493,7 @@ evidence caused it, what still differs, and choose exactly one next action:
   `joints`/`parents`/`names`/`matrix_local`/packed skin payload with
   `forge/stage5_rig/validate_rig_payload.py` before binding `THREE.Skeleton`. The gate proves
   structural payload integrity only; pose stress, dynamic bounds, readable screenshots, and
-  visual likeness remain separate gates. Distillation and non-goals:
-  `docs/research/unirig-skeleton-skinning-distillation.md` and
+  visual likeness remain separate gates. Payload ownership and non-goals:
   `grimoire/readiness/procedural_rigging_contract.md`.
 - **Assembly gate (structure, not pixels) — every model ships explodable AND clickable**: this is
   a build requirement, not a per-project extra. Name every mesh; flag surface relief
@@ -589,9 +587,8 @@ When Python is requested for character rendering, use it as a deterministic job/
 around the browser Three.js runtime: camera-batch manifests, source/output hashes, readiness and
 settle checks, screenshot persistence, masks, diagnostics, and comparison packaging. The target
 Three.js browser route remains the rendering authority. Do not silently replace the procedural
-TypeScript factory with Blender/VRM/GLB output. Full routing, repository findings, manifest
-fields, and failure rules: `grimoire/build/python_threejs_render_bridge.md` and
-`docs/research/python-threejs-character-rendering.md`.
+TypeScript factory with Blender/VRM/GLB output. Full routing, manifest fields, and failure rules:
+`grimoire/build/python_threejs_render_bridge.md`.
 
 ### Standard character pipeline (merged 1.5 beta + alpha)
 
@@ -599,8 +596,9 @@ Use `grimoire/readiness/standard_character_pipeline.md` for character work. Beta
 strict sculpt/build/review gates; alpha owns deterministic camera manifests, browser screenshot
 evidence and UniRig-shaped rig validation. CharacterGen, Tripo, VRM and other neural/asset
 systems are opt-in adapters with source, checkpoint, license, coordinate conversion and output
-hashes. They never silently replace the procedural TypeScript factory. Repository roles are
-recorded in `docs/research/threejs-character-repository-comparison.md`.
+hashes. They never silently replace the procedural TypeScript factory. Image-to-mesh systems emit a
+static mesh with no skeleton, so their output is never animation-ready however good it looks; neural
+riggers are offline inference whose value here is the serialized payload, not a browser dependency.
 
 Executable entry points are `forge/stage4_review/render_bridge.py` and
 `scripts/capture_threejs_playwright.py`. Run `init → browser capture → validate → diagnose`;

@@ -167,6 +167,3 @@ It does not fall back to a Python/Blender image and does not claim that a render
 - Do not compare orbit images to a reference angle that was never supplied.
 - Do not infer visual success from TypeScript compilation, `__READY__`, or an inline preview.
 - Do not add Playwright/Chromium dependencies to the zero-install core without explicit scope.
-
-See [the research distillation](../../docs/research/python-threejs-character-rendering.md) for
-repository evidence and the rationale behind this routing.
