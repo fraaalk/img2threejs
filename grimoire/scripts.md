@@ -313,6 +313,19 @@ is listed with its reason, so a short mesh list cannot be mistaken for a clean o
 
 ## Reference comparison and baselines
 
+### stage4_review/interior_difference.py
+`stage4_review/interior_difference.py BASELINE.png RENDER.png [--from 0] [--to 0.19] [--json]`
+Appearance difference **inside** the silhouette, banded by height. Required evidence on every visual
+pass, because silhouette IoU is computed from roughly 11% of figure cells — the ones on the outline —
+and is blind to the other 89%. The measured proof: a model with its face deleted scored 0.8803
+against the finished face's 0.8803, identical to four decimals, and adding an entire mouth moved
+that metric −0.0002. Both renders are aligned by foreground bounding box, the same normalisation the
+IoU scorer uses, and only cells that are figure in **both** are compared so outline agreement cannot
+leak back in. Refuses to score when either foreground mask fell back to whole-frame coverage — the
+same hard gate `divine_eye` makes, for the same reason. Reports `cellsCompared`, so a difference
+measured over a handful of cells cannot pass as evidence. On a standing figure the head is roughly
+`--from 0 --to 0.19`.
+
 ### stage4_review/mesh_reference_compare.py
 `stage4_review/mesh_reference_compare.py REFERENCE.glb CANDIDATE.glb [--bands N] [--json]`
 Says **where** a candidate is wrong, band by band, instead of returning one aggregate score. Both

@@ -130,6 +130,14 @@ def next_required_evidence(spec: dict[str, Any], pass_id: str) -> list[str]:
     if pass_id in VISUAL_PASS_IDS:
         evidence.append("browser render screenshot from your agent's browser/screenshot tool")
         evidence.append("side-by-side reference/render comparison sheet for AI vision review")
+        # Silhouette IoU is computed from the ~11% of figure cells on the outline. A model with its
+        # face deleted scored 0.8803 against the finished face's 0.8803 -- so an outline score is
+        # not evidence about anything inside the outline, and a loop optimising it will spend its
+        # whole budget without moving the interior. Read this per region, not as one number.
+        evidence.append(
+            "banded interior difference vs the reference baseline "
+            "(forge/stage4_review/interior_difference.py --from/--to per region)"
+        )
         evidence.append("AI vision score at or above the visual acceptance threshold")
         evidence.append("all critical semantic feature scores from the shared image pair at or above their thresholds")
         evidence.append("self-correction review appended with action=continue before the next pass")
