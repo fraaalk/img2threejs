@@ -144,6 +144,34 @@ class EmittedSource(unittest.TestCase):
     def test_recomputes_normals_after_building(self) -> None:
         self.assertIn("computeVertexNormals", self.source())
 
+    def test_a_collapsed_station_emits_one_vertex_not_a_zero_radius_ring(self) -> None:
+        """The reason the taper warning was not enough on its own.
+
+        A ring of radius 0 still carries `radial` coincident vertices and `radial` zero-area
+        triangles, so the sweep ends in a blunt cap the width of floating-point noise. The existing
+        `sectionedLoft` in the humanoid demo collapses such a section to a single vertex, and a hair
+        lock, a horn or a blade tip has to actually reach a point.
+        """
+        source = self.source()
+        self.assertIn("st.rx <= 1e-6 && st.rz <= 1e-6", source)
+        self.assertIn("isPoint", source)
+
+    def test_a_point_end_is_not_capped_again(self) -> None:
+        self.assertIn("if (isPoint[end]) continue;", self.source())
+
+
+class DefaultDescriptor(unittest.TestCase):
+    def test_the_default_tip_is_a_true_point(self) -> None:
+        tip = _DEFAULT_TAPERED_SWEEP["stations"][-1]
+        self.assertEqual(tip["rx"], 0.0)
+        self.assertEqual(tip["rz"], 0.0)
+
+    def test_the_default_passes_its_own_taper_gate(self) -> None:
+        severity, _ = taper_risk(
+            "default", {"geometryDescriptor": {"taperedSweep": _DEFAULT_TAPERED_SWEEP}}
+        )
+        self.assertEqual(severity, "OK")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
