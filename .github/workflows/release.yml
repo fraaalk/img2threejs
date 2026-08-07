@@ -14,6 +14,7 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
       version-file: SKILL.md
-      bootstrap-release: ${{ github.ref_name == 'v1.4.3' }}
-      # For the first governed tag this remains empty. Update it in the next release-prep PR.
-      previous-governed-tag: ""
+      # v1.4.3 bootstrapped the governed line and is already published; nothing bootstraps again.
+      bootstrap-release: false
+      # Last published governed tag. `git ls-remote --tags origin` shows v1.4.3 as the only one.
+      previous-governed-tag: "v1.4.3"

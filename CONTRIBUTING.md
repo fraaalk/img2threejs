@@ -26,7 +26,9 @@ explicit, flagged, opt-in mode.
 ## Development
 
 - Scripts are pure Python 3.10+ standard library. No pip dependencies.
-- Run the test suite from the skill root: `python3 forge/tests/test_pipeline.py`.
+- Run the test suite from the skill root: `python3 -m unittest discover -s forge/tests -p 'test_*.py'`.
+  Set `IMG2THREEJS_SHOWCASE_ROOT` to a showcase checkout to include the TypeScript typecheck gates;
+  without it they skip, so a green run has not proven the emitted Three.js compiles.
 - Validate a spec before generation: `python3 forge/stage2_spec/validate_sculpt_spec.py spec.json --strict-quality`.
 - Keep changes backward compatible: existing object specs must continue to validate.
 - No emojis in source, docs, or generated output.

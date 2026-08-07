@@ -156,16 +156,16 @@
   },
   "spatial_wear_glossary": {
     "core_industry_terms": {
-      "surface_imperfections": {"en": "Surface Imperfections", "vi": "Khuyết điểm bề mặt", "def": "Microscopic variations (fingerprints, micro-scratches) that break uniform reflections."},
-      "weathering_aging": {"en": "Weathering / Aging", "vi": "Phong hóa / Lão hóa", "def": "Surface degradation from environmental exposure over time."},
-      "wear_and_tear": {"en": "Wear and Tear", "vi": "Hao mòn sử dụng", "def": "Physical damage from active use or friction."},
-      "edge_wear": {"en": "Edge Wear", "vi": "Mòn cạnh viền", "def": "Damage concentrated along sharp corners or high-exposure edges."},
-      "procedural_grunge": {"en": "Procedural Grunge", "vi": "Cáu bẩn thuật toán", "def": "Algorithmically generated dirt distributed via AO or curvature masks."}
+      "surface_imperfections": {"en": "Surface Imperfections", "def": "Microscopic variations (fingerprints, micro-scratches) that break uniform reflections."},
+      "weathering_aging": {"en": "Weathering / Aging", "def": "Surface degradation from environmental exposure over time."},
+      "wear_and_tear": {"en": "Wear and Tear", "def": "Physical damage from active use or friction."},
+      "edge_wear": {"en": "Edge Wear", "def": "Damage concentrated along sharp corners or high-exposure edges."},
+      "procedural_grunge": {"en": "Procedural Grunge", "def": "Algorithmically generated dirt distributed via AO or curvature masks."}
     },
     "damage_types_pbr_impact": {
       "oxidation_rust_patina": {
         "en": "Oxidation / Rust / Patina", 
-        "vi": "Oxy hóa / Rỉ sét / Lớp ô-xy hóa",
+        
         "albedo": "Orange-brown or dark-green shift",
         "roughness": {"range": [0.8, 1.0], "impact": "Increases significantly"},
         "metalness": {"range": [0.0, 0.0], "impact": "Drops to 0 (Dielectric oxide)"},
@@ -173,7 +173,7 @@
       },
       "scratches_dents": {
         "en": "Scratches / Dents", 
-        "vi": "Vết xước / Móp méo",
+        
         "albedo": "Exposes base silver/grey metal",
         "roughness": {"range": [0.1, 0.2], "impact": "Decreases at center (shiny base)"},
         "metalness": {"range": [1.0, 1.0], "impact": "Increases if paint is scraped"},
@@ -181,7 +181,7 @@
       },
       "smudges_fingerprints": {
         "en": "Smudges / Fingerprints", 
-        "vi": "Vết ố / Dấu vân tay",
+        
         "albedo": "Negligible change",
         "roughness": {"range": [0.4, 0.6], "impact": "Localized increase (oily layer)"},
         "metalness": {"range": [null, null], "impact": "Unchanged"},
@@ -189,7 +189,7 @@
       },
       "dust_dirt_mud": {
         "en": "Dust / Dirt / Mud", 
-        "vi": "Bụi / Đất sét / Bùn",
+        
         "albedo": "Matches environment (tan/brown/grey)",
         "roughness": {"range": [0.9, 1.0], "impact": "Becomes completely rough"},
         "metalness": {"range": [0.0, 0.0], "impact": "Drops to 0 (Non-metallic soil)"},
@@ -197,11 +197,11 @@
       }
     },
     "spatial_modifiers": {
-      "tip_to_spine_gradient": {"en": "Tip-to-spine gradient", "vi": "Gradient từ mũi đến sống dao"},
-      "edge_heavy": {"en": "Edge-heavy wear", "vi": "Mòn tập trung ở cạnh"},
-      "friction_point": {"en": "Friction-point wear", "vi": "Mòn điểm ma sát"},
-      "speckled": {"en": "Speckled", "vi": "Dạng đốm"},
-      "exposed_core": {"en": "Exposed core", "vi": "Lộ lõi"}
+      "tip_to_spine_gradient": {"en": "Tip-to-spine gradient"},
+      "edge_heavy": {"en": "Edge-heavy wear"},
+      "friction_point": {"en": "Friction-point wear"},
+      "speckled": {"en": "Speckled"},
+      "exposed_core": {"en": "Exposed core"}
     }
   }
 }

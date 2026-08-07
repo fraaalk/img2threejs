@@ -21,9 +21,10 @@ For extra focused retrieval, the direct CLI remains available:
 python3 forge/stage1_intake/search_specs.py "<query>" --collection <collection> --limit 3 --snippet-chars 250 --json
 ```
 
-For CS2, include English/Vietnamese variants, for example `--spec-query "safety ring vòng ngón"`
-or `search_specs.py "roughness độ nhám" --collection cs2`. Expand queries with object names,
-component names, material/finish terms, behavior terms, and bilingual aliases; retry focused
+For CS2, include the anatomical and the colloquial name, for example
+`--spec-query "safety ring finger ring"` or `search_specs.py "roughness matte" --collection cs2`.
+Expand queries with object names,
+component names, material/finish terms, behavior terms, and known aliases; retry focused
 alternatives when the first result is incomplete. Build the spec from returned evidence and do
 not invent domain specs when local evidence exists. Search caches are local/generated only;
 preserve JSONL records and source provenance rather than replacing them with cache output.

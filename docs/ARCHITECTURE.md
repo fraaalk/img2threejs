@@ -12,6 +12,8 @@ The skill runs a staged sculpting pipeline. Scripts gate each stage; the agent's
 flowchart TD
     A[Reference image] --> B[Probe and suitability gate]
     B --> C[Pre-Spec Assessment: class, complexity, quality contract]
+    B -. when useful .-> A1[Optional mask, landmark and relative-depth evidence]
+    A1 --> C
     C --> D[Author ObjectSculptSpec: components, materials, sockets]
     D --> E{Validate and strict-quality}
     E -- too shallow --> D
@@ -27,6 +29,27 @@ flowchart TD
     L -- no --> M[Animation-ready Three.js model]
 ```
 
+### Material reference hand-off
+
+Material identity is an executable sub-pipeline rather than prose in the spec:
+
+```text
+named component region
+  -> verified crop + observation
+  -> material-reference.json resolver
+  -> reference-derived PBR maps and bounded prior
+  -> ObjectSculptSpec materialReference/materialPipeline
+  -> generated material userData and color-space-safe maps
+  -> multi-angle zoom/microscope capture
+  -> per-region comparator and bounded feedback
+  -> materialGate + material-pass unlock
+```
+
+`forge/materials/reference.py` is the runtime registry contract. The registry never decides from
+colour alone and an ambiguous or low-confidence region remains `probe`/`request-input`. The
+material gate also checks that UV/map bindings survive geometry, visual hull, skinning, collision,
+morph and LOD changes. Existing specs without `materialPipeline` remain backward-compatible.
+
 ### Build passes
 
 The model is sculpted in a fixed order; a pass unlocks only after the previous one is reviewed and accepted:
@@ -34,6 +57,12 @@ The model is sculpted in a fixed order; a pass unlocks only after the previous o
 `blockout → structural-pass → form-refinement → material-pass → surface-pass → lighting-pass → interaction-pass → optimization-pass`
 
 Each pass has its own acceptance criteria. A pass is marked `continue` only with a real render, a comparison sheet, an agent-vision score at or above threshold, and every identity-defining feature at or above its own threshold.
+
+For resumable work, `forge/state.py` stores an atomic JSON checklist around this pipeline. Profile
+steps for `character` and `cs2` are inserted before local spec authoring; correction counts are
+bounded per pass and globally. `forge/next.py --state` reports the next ordered action and rejects
+a positional spec that differs from the state artifact. This state index does not grant a pass:
+the ObjectSculptSpec, render evidence, review history, and deterministic gates still decide.
 
 ### The gates
 
@@ -70,20 +99,29 @@ The net effect: you still get a faithful 3D model from an image, but the expensi
 | Script | Role |
 | --- | --- |
 | `stage1_intake/probe_image.py` | Image metadata and obvious technical issues (not a visual check). |
+| `stage1_intake/probe_glb.py` | GLB provenance, bounds, scene inventory and conservative semantic-readiness assessment. |
 | `stage2_spec/new_pre_spec_assessment.py` | Classify the object, score complexity, emit a quality contract. |
 | `stage2_spec/new_sculpt_spec.py` | Author the ObjectSculptSpec from the assessment. |
 | `stage2_spec/validate_sculpt_spec.py` | Validate the spec; `--strict-quality` blocks shallow specs before codegen. |
 | `stage1_intake/extract_pbr_evidence.py` | Reference-derived PBR evidence per crop (inference, not inverse rendering). |
+| `stage1_intake/material_region_analysis.py` | Region crop admission, PBR extraction, and material-reference resolution. |
+| `stage2_spec/apply_material_analysis.py` | Material analysis to ObjectSculptSpec hand-off. |
 | `stage3_build/orchestrate_passes.py` | Locked pass state: status, check, sync. |
 | `stage3_build/generate_threejs_factory.py` | Emit the Three.js `Group` factory for the current unlocked pass. |
 | `stage4_review/make_comparison_sheet.py` | Package one reference-vs-render sheet for review. |
 | `stage4_review/append_review.py` | Record a per-pass review: scores, decision, evidence. |
+| `stage4_review/material_views.py` | Deterministic material camera/crop/microscope plan and capture readback validation. |
+| `stage4_review/material_comparator.py` | Per-region crop metrics and mismatch tags. |
+| `stage4_review/material_gate.py` | Blocking material acceptance and cross-pass compatibility gate. |
+| `stage4_review/validate_render_profile.py` | Validate the shared GLB/procedural renderer, camera and six-pass profile. |
+| `stage4_review/compare_region_passes.py` | Compare paired browser diagnostic passes and block unsupported per-region claims. |
 | `stage4_review/cs2_review.py` | Evaluate the blocking CS2 knife review contract and versioned scene thresholds. |
 | `_shared/feature_acceptance_policy.py` | Internal helper enforcing per-feature score thresholds. |
 | `stage1_intake/build_detail_inventory.py` | Slice the reference into zones and scaffold a detail inventory. |
 | `stage1_intake/extract_landmarks.py` | Overlay a landmark grid and scaffold an anatomy block for characters. |
 | `stage1_intake/solve_camera_pose.py` | Emit a reference-camera block so the render can be camera-matched. |
 | `stage1_intake/delight_albedo.py` | Approximate a neutral albedo from the photo before texture projection. |
+| `stage1_intake/run_vision_adapter.py` | Invoke optional isolated SAM2, MediaPipe, and Depth Anything evidence adapters. |
 | `stage3_build/bake_projected_texture.py` | Emit a projection/UV-bake descriptor for photo-texture projection. |
 
 The `grimoire/` folder holds the detailed rubrics each gate applies (validation, pre-spec assessment, procedural patterns, material and lighting realism, attachment correctness, action-ready models, self-correction).

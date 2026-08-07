@@ -35,6 +35,26 @@ class WorkflowStateTest(unittest.TestCase):
         self.assertLess(ids.index("projection-route"), ids.index("spec-authoring"))
         self.assertLess(ids.index("material-evidence"), ids.index("strict-validation"))
 
+    def test_material_reference_wiring_is_in_the_setup_checklist(self):
+        """The material track is executable, not prose.
+
+        Both steps were dropped once already: merge 7214452 resolved this file to a revision
+        whose `material-evidence` step only *described* running a script, and which had no
+        wiring step at all, so `material_region_analysis.py` and `apply_material_analysis.py`
+        became unreachable from the checklist that drives the pipeline. This test is what makes
+        that regression fail loudly instead of silently.
+        """
+        state = new_state("reference.png")
+        by_id = {entry["id"]: entry for entry in state["checklist"]}
+        self.assertIn("material-evidence", by_id)
+        self.assertIn("material-spec-wiring", by_id)
+        self.assertIn("material_region_analysis.py", by_id["material-evidence"]["command"])
+        self.assertIn("apply_material_analysis.py", by_id["material-spec-wiring"]["command"])
+        ids = [entry["id"] for entry in state["checklist"]]
+        self.assertLess(ids.index("spec-authoring"), ids.index("material-evidence"))
+        self.assertLess(ids.index("material-evidence"), ids.index("material-spec-wiring"))
+        self.assertLess(ids.index("material-spec-wiring"), ids.index("strict-validation"))
+
     def test_cs2_state_includes_classification_and_manifest_before_pre_spec(self):
         state = new_state("knife.png", profile="cs2")
         ids = [entry["id"] for entry in state["checklist"]]
