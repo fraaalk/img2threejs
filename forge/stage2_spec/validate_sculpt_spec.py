@@ -48,6 +48,7 @@ VALID_PRIMITIVES = {
     "extrude",
     "ground-blade",
     "curve-sweep",
+    "tapered-sweep",
     "plane-card",
     "instanced-cluster",
 }
@@ -287,6 +288,52 @@ def _bbox_diagonal(points: list) -> float:
     if not xs or not ys:
         return 0.0
     return ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) ** 0.5
+
+
+TAPER_RATIO_MAX = 0.55   # tip/root radius above this ⇒ it is not tapering, it is a tube
+
+
+def taper_risk(component_id: str, component: dict[str, Any]) -> tuple[str, str]:
+    """Warn when a `tapered-sweep`'s stations do not actually taper.
+
+    Measured from a recovered build: eleven hair locks each ended at radius 0.0327 -- identical to
+    four decimals across every lock -- for tip/root ratios of 0.58 to 0.79. The machinery was
+    correct and the authored stations were not, so the locks came out blunt and read as noodles.
+    Nothing caught it, because a sweep that refuses to taper is still a valid sweep. The reference
+    those locks were built against measures 0.087.
+    """
+    descriptor = component.get("geometryDescriptor")
+    if not isinstance(descriptor, dict):
+        return ("OK", "")
+    sweep = descriptor.get("taperedSweep")
+    if not isinstance(sweep, dict):
+        return ("OK", "")
+    stations = sweep.get("stations")
+    if not isinstance(stations, list) or len(stations) < 2:
+        return ("OK", "")
+    first, last = stations[0], stations[-1]
+    if not isinstance(first, dict) or not isinstance(last, dict):
+        return ("OK", "")
+    root = max(
+        float(first.get("rx", 0.0)) if is_number(first.get("rx")) else 0.0,
+        float(first.get("rz", 0.0)) if is_number(first.get("rz")) else 0.0,
+    )
+    tip = max(
+        float(last.get("rx", 0.0)) if is_number(last.get("rx")) else 0.0,
+        float(last.get("rz", 0.0)) if is_number(last.get("rz")) else 0.0,
+    )
+    if root <= 0:
+        return ("OK", "")
+    ratio = tip / root
+    if ratio > TAPER_RATIO_MAX:
+        return (
+            "HIGH",
+            f"quality: component {component_id!r} declares primitive 'tapered-sweep' but its "
+            f"stations barely taper (tip/root={ratio:.2f} > {TAPER_RATIO_MAX}); it will read as a "
+            f"constant-radius noodle. Either taper the tip toward the root fraction the reference "
+            f"measures, or use 'tube' and say so.",
+        )
+    return ("OK", "")
 
 
 def flatness_risk(component_id: str, component: dict[str, Any]) -> tuple[str, str]:
@@ -1273,6 +1320,9 @@ def validate_components(
                     severity, message = flatness_risk(component_id, component)
                     if severity == "HIGH":
                         warnings.append(message)
+                taper_severity, taper_message = taper_risk(component_id, component)
+                if taper_severity == "HIGH":
+                    warnings.append(taper_message)
                 if topology_class == "implicit":
                     descriptor = component.get("geometryDescriptor")
                     if not isinstance(descriptor, dict) or "sdf" not in descriptor:

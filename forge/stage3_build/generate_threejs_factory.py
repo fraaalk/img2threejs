@@ -35,26 +35,14 @@ from subdivision import (
     TORUS_RADIAL_SEGMENTS,
     TORUS_TUBULAR_SEGMENTS,
 )
-from validate_sculpt_spec import validate_spec
+from validate_sculpt_spec import VALID_PRIMITIVES, validate_spec
 from visual_hull import MAX_VISUAL_HULL_TRIANGLES
 
-
-VALID_PRIMITIVES = {
-    "box",
-    "sphere",
-    "ellipsoid",
-    "cylinder",
-    "cone",
-    "capsule",
-    "torus",
-    "tube",
-    "lathe",
-    "extrude",
-    "ground-blade",
-    "curve-sweep",
-    "plane-card",
-    "instanced-cluster",
-}
+# VALID_PRIMITIVES is re-exported rather than redefined. This module used to keep its own copy,
+# and the two stayed identical only because someone edited both every time. A primitive present
+# in one list and absent from the other does not error: line ~2873 silently rewrites it to "box",
+# so the spec validates, the factory builds, and the wrong shape ships. Importing the validator's
+# set makes that class of drift impossible instead of merely unlikely.
 DEFAULT_PASS_ORDER = [
     "blockout",
     "structural-pass",
@@ -321,6 +309,23 @@ _DEFAULT_CURVE_SWEEP = {
     "spine": [[-0.5, -0.4, 0.0], [-0.1, 0.1, 0.0], [0.3, 0.2, 0.0], [0.6, -0.1, 0.0]],
     "crossSection": {"points": [[-0.04, -0.02], [0.04, -0.02], [0.04, 0.02], [-0.04, 0.02]]},
     "closed": False,
+}
+
+# A sweep whose cross-section CHANGES along the spine. Every other sweep this factory emits --
+# tube, curve-sweep, extrude -- carries one constant section from root to tip, so nothing that
+# comes to a point (a hair lock, a horn, a tail, a blade tip, a finger) can be expressed by them.
+# The default tapers to 8% of its root, which is the profile the grimoire prescribes; the
+# validator warns when a spec's stations do not actually taper, because a barely-tapering sweep
+# is a `tube` written the long way and reads as a noodle.
+_DEFAULT_TAPERED_SWEEP = {
+    "stations": [
+        {"position": [0.0, -0.5, 0.0], "rx": 0.060, "rz": 0.040, "twist": 0.0},
+        {"position": [0.0, -0.1, 0.0], "rx": 0.048, "rz": 0.030, "twist": 0.0},
+        {"position": [0.0, 0.25, 0.0], "rx": 0.024, "rz": 0.014, "twist": 0.0},
+        {"position": [0.0, 0.5, 0.0], "rx": 0.005, "rz": 0.003, "twist": 0.0},
+    ],
+    "radialSegments": 10,
+    "capEnds": True,
 }
 
 
@@ -1336,6 +1341,13 @@ def geometry_for(
     if primitive == "curve-sweep":
         sweep = descriptor.get("curveSweep") if isinstance(descriptor.get("curveSweep"), dict) else _DEFAULT_CURVE_SWEEP
         return f"buildCurveSweepGeometry({json_literal(sweep)})"
+    if primitive == "tapered-sweep":
+        tapered = (
+            descriptor.get("taperedSweep")
+            if isinstance(descriptor.get("taperedSweep"), dict)
+            else _DEFAULT_TAPERED_SWEEP
+        )
+        return f"buildTaperedSweepGeometry({json_literal(tapered)})"
     if primitive == "instanced-cluster":
         # An instanced cluster's *geometry* is its base shape; the instancing itself is applied
         # by the repetition-system emitter (THREE.InstancedMesh). Resolve the base primitive from
@@ -2136,6 +2148,103 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 "  const curve = new THREE.CatmullRomCurve3(vectors, path.closed ?? false);",
                 "  const tubularSegments = Math.max(8, path.points.length * 6);",
                 "  return new THREE.TubeGeometry(curve, tubularSegments, path.radius ?? 0.05, path.radialSegments ?? 8, path.closed ?? false);",
+                "}",
+                "",
+            ]
+        )
+    if "tapered-sweep" in used_primitives:
+        lines.extend(
+            [
+                "type TaperedStation = { position: [number, number, number]; rx: number; rz: number; twist?: number };",
+                "",
+                "// Frames come from PARALLEL TRANSPORT, not from a Frenet frame. A Frenet frame is defined by",
+                "// the curve's normal, which flips sign wherever the path has an inflection or straightens out,",
+                "// and every flip twists the surface 180 degrees within one segment. Carrying the previous frame",
+                "// forward and removing only its along-path component keeps the twist continuous. THREE's own",
+                "// extrudePath and TubeGeometry do not expose this, which is why this is hand-built.",
+                "function buildTaperedSweepGeometry(",
+                "  sweep: { stations: TaperedStation[]; radialSegments?: number; capEnds?: boolean },",
+                "): THREE.BufferGeometry {",
+                "  const stations = sweep.stations;",
+                "  if (stations.length < 2) throw new Error('tapered-sweep needs at least two stations');",
+                "  const radial = Math.max(3, sweep.radialSegments ?? 10);",
+                "  const centres = stations.map((s) => new THREE.Vector3(...s.position));",
+                "",
+                "  const tangents = centres.map((_, i) => {",
+                "    const prev = centres[Math.max(0, i - 1)];",
+                "    const next = centres[Math.min(centres.length - 1, i + 1)];",
+                "    const t = next.clone().sub(prev);",
+                "    // Coincident neighbours would normalise to NaN and poison every downstream vertex.",
+                "    return t.lengthSq() < 1e-12 ? new THREE.Vector3(0, 1, 0) : t.normalize();",
+                "  });",
+                "",
+                "  // Seed a reference axis that is not parallel to the first tangent, or the first cross",
+                "  // product is degenerate and the whole sweep collapses to a line.",
+                "  let ref = new THREE.Vector3(0, 0, 1);",
+                "  if (Math.abs(tangents[0].dot(ref)) > 0.9) ref = new THREE.Vector3(1, 0, 0);",
+                "",
+                "  const normals: THREE.Vector3[] = [];",
+                "  const binormals: THREE.Vector3[] = [];",
+                "  let carried = ref.clone().sub(tangents[0].clone().multiplyScalar(ref.dot(tangents[0]))).normalize();",
+                "  for (let i = 0; i < tangents.length; i += 1) {",
+                "    const t = tangents[i];",
+                "    // Project the carried frame back onto the plane perpendicular to this tangent.",
+                "    const n = carried.clone().sub(t.clone().multiplyScalar(carried.dot(t)));",
+                "    if (n.lengthSq() < 1e-12) {",
+                "      const fallback = Math.abs(t.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);",
+                "      n.copy(fallback.sub(t.clone().multiplyScalar(fallback.dot(t))));",
+                "    }",
+                "    n.normalize();",
+                "    normals.push(n);",
+                "    binormals.push(new THREE.Vector3().crossVectors(t, n).normalize());",
+                "    carried = n;",
+                "  }",
+                "",
+                "  const positions: number[] = [];",
+                "  const uvs: number[] = [];",
+                "  const indices: number[] = [];",
+                "  for (let i = 0; i < stations.length; i += 1) {",
+                "    const st = stations[i];",
+                "    const twist = ((st.twist ?? 0) * Math.PI) / 180;",
+                "    const v = i / (stations.length - 1);",
+                "    for (let j = 0; j <= radial; j += 1) {",
+                "      const theta = (j / radial) * Math.PI * 2 + twist;",
+                "      const offset = normals[i].clone().multiplyScalar(Math.cos(theta) * st.rx)",
+                "        .add(binormals[i].clone().multiplyScalar(Math.sin(theta) * st.rz));",
+                "      const p = centres[i].clone().add(offset);",
+                "      positions.push(p.x, p.y, p.z);",
+                "      uvs.push(j / radial, v);",
+                "    }",
+                "  }",
+                "",
+                "  const ring = radial + 1;",
+                "  for (let i = 0; i < stations.length - 1; i += 1) {",
+                "    for (let j = 0; j < radial; j += 1) {",
+                "      const a = i * ring + j;",
+                "      const b = a + ring;",
+                "      indices.push(a, b, a + 1, a + 1, b, b + 1);",
+                "    }",
+                "  }",
+                "",
+                "  if (sweep.capEnds ?? true) {",
+                "    for (const end of [0, stations.length - 1]) {",
+                "      const centreIndex = positions.length / 3;",
+                "      positions.push(centres[end].x, centres[end].y, centres[end].z);",
+                "      uvs.push(0.5, end === 0 ? 0 : 1);",
+                "      const base = end * ring;",
+                "      for (let j = 0; j < radial; j += 1) {",
+                "        if (end === 0) indices.push(centreIndex, base + j + 1, base + j);",
+                "        else indices.push(centreIndex, base + j, base + j + 1);",
+                "      }",
+                "    }",
+                "  }",
+                "",
+                "  const geometry = new THREE.BufferGeometry();",
+                "  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));",
+                "  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));",
+                "  geometry.setIndex(indices);",
+                "  geometry.computeVertexNormals();",
+                "  return geometry;",
                 "}",
                 "",
             ]
