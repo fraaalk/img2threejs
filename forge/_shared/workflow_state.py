@@ -83,6 +83,25 @@ class WorkflowStateError(ValueError):
     pass
 
 
+def _has_external_versioned_ledger(state: dict[str, Any]) -> bool:
+    """Return whether a versioned rebuild owns its loop ledger outside the generic spec history.
+
+    V1 states derive loop counts from the spec reviewHistory. A versioned rebuild can carry a
+    separate, compacted ledger (for example state-v2.json) whose review history intentionally does
+    not have the same cursor or pass semantics as the original spec. The local state remains the
+    authority in that case; next.py must validate and report it without rewriting it from V1 data.
+    """
+    active = state.get("activeVersion")
+    baseline = state.get("baselineVersion")
+    return (
+        isinstance(active, str)
+        and bool(active.strip())
+        and isinstance(baseline, str)
+        and bool(baseline.strip())
+        and active != baseline
+    )
+
+
 def _step(step_id: str, command: str, *, scope: str) -> dict[str, Any]:
     return {
         "id": step_id,
@@ -243,7 +262,7 @@ def next_entry(state: dict[str, Any]) -> dict[str, Any] | None:
             "id": "await-pass-transition",
             "scope": "pass",
             "status": "pending",
-            "command": "python3 forge/next.py --state .img2threejs/state.json {spec}",
+            "command": f"python3 forge/next.py --state {state.get('statePath') or '.img2threejs/state.json'} {{spec}}",
         }
     final_pending = _pending(_entries(state, "final"))
     return final_pending[0] if final_pending else None
@@ -328,11 +347,24 @@ def set_current_pass(state: dict[str, Any], pass_id: str) -> None:
 
 
 def sync_from_spec(state: dict[str, Any], spec: dict[str, Any], current_pass: str) -> None:
+    if _has_external_versioned_ledger(state):
+        # A versioned reconstruction may deliberately use a separate review/loop ledger and a
+        # compact resume contract. Validate/report the state, but never derive its counters or
+        # current step from the baseline spec's reviewHistory.
+        return
+    # A user-authorized loop reset starts a new correction epoch without
+    # deleting the prior review ledger. The old ledger remains authoritative
+    # evidence; only reviews at/after loopEpochStart count toward the new cap.
+    if state.get("loopEpochStart") is not None and state.get("status") == "stopped":
+        state["status"] = "active"
+        state["stopReason"] = ""
     set_current_pass(state, current_pass)
     history = spec.get("reviewHistory", [])
     if not isinstance(history, list):
         history = []
-    review_cursor = min(int(state.get("reviewCursor", 0)), len(history))
+    epoch_start = int(state.get("loopEpochStart", 0) or 0)
+    epoch_start = max(0, min(epoch_start, len(history)))
+    review_cursor = max(epoch_start, min(int(state.get("reviewCursor", 0)), len(history)))
     new_reviews = history[review_cursor:]
     refinements = [
         entry
@@ -357,7 +389,7 @@ def sync_from_spec(state: dict[str, Any], spec: dict[str, Any], current_pass: st
     state["reviewCursor"] = len(history)
     per_pass: dict[str, int] = {}
     total = 0
-    for entry in history:
+    for entry in history[epoch_start:]:
         if not isinstance(entry, dict) or entry.get("action") not in REFINE_ACTIONS:
             continue
         pass_id = str(entry.get("passId") or "unknown")
