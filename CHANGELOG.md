@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-indexed geometry, and fails closed rather than writing an empty `meshes.json` that every
   downstream gate would score as clean. The browser driver is resolved via `--driver`,
   `$IMG2THREEJS_PLAYWRIGHT`, or a bare `playwright` import — never a hardcoded absolute path.
+- Add `forge/stage4_review/rank_lookdev_sweep.py`, which ranks a rendered look-dev parameter
+  sweep against the reference so the choice is measured rather than reasoned. Motivation is a
+  measured failure: three consecutive correction loops moved a finish in the WRONG direction
+  (saturation error -24, -62, -79) because each reasoned about PBR physics and measured only
+  afterwards, while the real culprit — the tone-mapping operator — had been fixed by assumption
+  on a doc comment's authority and left outside the search. Enumerating 4 operators x 4 exposures
+  settled it in one run, and the winner was the operator the doc had ruled out. Ranks on value +
+  saturation delta over the subject foreground, because the failing candidates were washed out
+  rather than off-hue and a lightness-weighted distance under-punishes that. Ranking is
+  whole-foreground and reports that limitation: on the same data a ruby-region-only objective
+  preferred a different exposure while agreeing on the operator.
 - Add `forge/stage4_review/capture_sanity.py`, a pre-flight check on the CAPTURE that runs before
   any render is compared to a reference. Every other gate asks whether the model is right; this
   one settles whether the picture is usable evidence at all, because a wrong harness produces

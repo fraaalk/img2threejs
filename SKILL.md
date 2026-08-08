@@ -361,6 +361,12 @@ IMG2THREEJS_SHOWCASE_ROOT=/path/to/img2threejs-showcase python3 forge/tests/test
    `forge/stage4_review/diagnose_render_multi_angle.py` with the fixed view and at least two
    meaningful orbit views. Then run
    `forge/stage3_build/orchestrate_passes.py check object-sculpt-spec.json --pass-id <pass>`.
+8b. **Sweep a look-dev parameter, do not reason about it.** When a finish is off and the
+   space is small and enumerable, render the grid and rank it:
+   `forge/stage4_review/rank_lookdev_sweep.py --reference <plate> --candidate LABEL=<shot> ...`
+   Put the variables you "already know" inside the sweep — the wrong one is
+   disproportionately the one nobody re-examined. Three correction loops were once spent
+   compensating for a tone-mapping operator that a doc comment had settled by assumption.
 9. Package one side-by-side sheet, then inspect it with agent vision:
    `forge/stage4_review/make_comparison_sheet.py --reference <img> --render <shot> --out cmp.png --json`.
 10. Record the review (overall + per-layer + per-feature scores + decision):
