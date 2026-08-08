@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-indexed geometry, and fails closed rather than writing an empty `meshes.json` that every
   downstream gate would score as clean. The browser driver is resolved via `--driver`,
   `$IMG2THREEJS_PLAYWRIGHT`, or a bare `playwright` import — never a hardcoded absolute path.
+- Add `forge/stage4_review/capture_sanity.py`, a pre-flight check on the CAPTURE that runs before
+  any render is compared to a reference. Every other gate asks whether the model is right; this
+  one settles whether the picture is usable evidence at all, because a wrong harness produces
+  numbers that read as model defects. Measured motivation: on one reconstruction 5 of 12
+  correction loops fixed the capture rather than the model — an oversized shadow catcher pushed
+  the auto-framed camera to z=54.87 and rendered the subject at 8% of frame width, a contact
+  shadow counted as foreground and inflated the bbox height 22% while width matched to 0.6%
+  (IoU 0.686), and a pinned near/far pair clipped the model once orbited so frames came back
+  empty and the degenerate-view gate read collapsed volume. Checks subject fraction, single
+  connected foreground, empty/fallback frames, and framing match against the reference; exits
+  0 usable / 1 capture defect / 2 error.
 - Add `alignedIoU` to `diagnose_render.py`: the best silhouette IoU reachable by a pure
   translation, alongside the raw value. `grimoire/review/self_correction.md` already prescribed
   trusting IoU "only after scale+translation alignment" but nothing computed it, so a correctly

@@ -311,6 +311,7 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    refused on an authored/unwrapped `uvStrategy`. For offline LOD tiers from an exported mesh,
    `forge/stage3_build/decimate.py <mesh.json> --ratio <r> --json` is the same algorithm.
 7. Render the current pass in a browser/preview, capture a screenshot at a review viewpoint.
+7pre. **Check the capture before you trust it.** `forge/stage4_review/capture_sanity.py --render <shot> [--reference <plate>]` settles whether the picture is usable evidence at all — subject fraction, a single connected foreground (a contact shadow is a second component and inflates the silhouette bbox on one axis), empty/clipped frames, and framing match. A wrong harness yields numbers that read as model defects, so this runs FIRST; exit 1 means fix the capture, not the model.
 7a. **Off-axis and placement gates — a single review viewpoint is not evidence about the model.**
    Capture a turntable, not one frame, and run all three. Each catches a defect class the older gates
    pass by construction; skipping them is how a hole through a skull, a hat at hip height and a charm
