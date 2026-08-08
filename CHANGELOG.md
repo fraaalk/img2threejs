@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-indexed geometry, and fails closed rather than writing an empty `meshes.json` that every
   downstream gate would score as clean. The browser driver is resolved via `--driver`,
   `$IMG2THREEJS_PLAYWRIGHT`, or a bare `playwright` import — never a hardcoded absolute path.
+- Port the compaction resume snapshot (`state.py compact`, `workflow_state`'s
+  `build_resume_snapshot`/`write_resume_snapshot`/`resume_snapshot_path`) from the
+  `~/.claude/skills` and `~/.codex/skills` host copies, which carried it while this repo never
+  did — `git log -S "def cmd_compact"` returns 0 commits here, so it was developed outside git
+  rather than deliberately dropped. Those copies were plain directories, not the symlinks
+  SKILL.md prescribes, and had forked: they lacked this repo's versioned rifle adapter and this
+  repo lacked their compaction work, so neither was a superset and symlinking either direction
+  would have destroyed real work. Ported additively — `_has_external_versioned_ledger` is absent
+  from those copies and stays — leaving the merged checkout a superset of all three. The feature
+  arrived untested; `forge/tests/test_compaction_snapshot.py` is new and covers the snapshot's
+  contract: it carries the resuming facts, names the state JSON as the authority rather than
+  itself, stays bounded as history grows, and replaces rather than appends on rewrite.
 - Add `forge/stage4_review/rank_lookdev_sweep.py`, which ranks a rendered look-dev parameter
   sweep against the reference so the choice is measured rather than reasoned. Motivation is a
   measured failure: three consecutive correction loops moved a finish in the WRONG direction

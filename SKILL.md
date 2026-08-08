@@ -62,6 +62,40 @@ completed step needs evidence; every skipped step needs a reason. The state file
 index, not visual evidence: renders, specs, review history, and deterministic gates remain the
 authoritative artifacts.
 
+### Compaction resume snapshot
+
+Large or versioned states must use the compact resume snapshot to resume across context
+compaction or a fresh agent. Generate or refresh it with:
+
+```sh
+python3 forge/state.py compact --state <active-state.json>
+```
+
+The state JSON remains machine authority; `compaction/resume.md` is the bounded human/LLM view.
+Read full `passHistory`, archived checklists, and review documents only for a targeted
+retrospective or active-family investigation. The forge save path refreshes the snapshot after
+every state write, so `init`/`mark` keep it current automatically.
+
+For versioned reconstructions (a rebuild, a new model version, or plateau recovery), freeze the
+prior version as immutable baseline evidence and create a separate state file (for example
+`.img2threejs/state-v2.json`). Do not reset, rewrite, or delete the prior state, spec, review
+history, renders, or source code:
+
+1. Run `forge/next.py` against the versioned state and versioned spec on every start/resume and
+   before every correction loop. Never infer progress from conversation history.
+2. Create a versioned handoff/contract file beside the state file naming the frozen baseline,
+   active version, research brief, reference paths, acceptance target, current phase, next
+   required command, non-negotiable gates, and unresolved uncertainty.
+3. Keep the new version's spec, reviews, renders, research notes, and code paths namespaced.
+   Reuse only utilities or evidence marked reusable; do not copy failed geometry profiles or
+   unvalidated transforms from the baseline.
+4. When context compaction or a fresh agent occurs, read the versioned `compaction/resume.md`
+   snapshot first, then the handoff and contract, before touching code. Load the full state
+   only when a tool or targeted investigation requires it; chat memory is never authority.
+
+This rule is generic: the version name may be `v2`, `epoch-2`, or another explicit identifier,
+but one active version must have exactly one authoritative state file.
+
 ## Transparency and Process Debugging (Critical — from Bowie Knife reconstruction)
 
 **The problem:** When the user cannot tell what was done or where something went wrong, they cannot debug the process. Over-claiming (reporting success when features still don't match) destroys trust and makes iterative improvement impossible.
