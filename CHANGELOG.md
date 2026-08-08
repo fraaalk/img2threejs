@@ -5,6 +5,26 @@ All notable changes to **img2threejs** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Add `runtime/scripts/export_mesh_geometry.mjs`, the mesh dumper `SKILL.md` already instructed
+  callers to run. It did not exist and neither did `runtime/`, so `self_intersection.py` and
+  `geometry_integrity.py` had no producer in this repo and their gates were never runnable while
+  the surrounding checklist still read as complete. Emits world-space vertices (seam-overlap
+  compares mesh PAIRS), expands `InstancedMesh` to one entry per instance, synthesises indices for
+  non-indexed geometry, and fails closed rather than writing an empty `meshes.json` that every
+  downstream gate would score as clean. The browser driver is resolved via `--driver`,
+  `$IMG2THREEJS_PLAYWRIGHT`, or a bare `playwright` import — never a hardcoded absolute path.
+- Add `alignedIoU` to `diagnose_render.py`: the best silhouette IoU reachable by a pure
+  translation, alongside the raw value. `grimoire/review/self_correction.md` already prescribed
+  trusting IoU "only after scale+translation alignment" but nothing computed it, so a correctly
+  shaped render that was merely mis-framed reported a low IoU — and a low IoU reads as "the shape
+  is wrong", sending the fix onto geometry that was already correct. Observed at 0.736 raw vs
+  0.965 after a 26px shift. Report-only by design: a genuine misplacement is also a translation,
+  so alignment never rescues the hard gate; it only lets the failure message say whether this is a
+  FRAMING error or a SHAPE error.
+
 ## [1.4.4-beta.2]
 
 ### Added

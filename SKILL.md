@@ -316,7 +316,8 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    pass by construction; skipping them is how a hole through a skull, a hat at hip height and a charm
    floating below the ground plane survived eight front-only review rounds.
    `forge/stage4_review/turntable_gate.py --capture 0=front.png --capture 90=right.png --capture 180=rear.png --capture 270=left.png --json`
-   `node runtime/scripts/export_mesh_geometry.mjs --url <preview> --out meshes.json` then
+   `node runtime/scripts/export_mesh_geometry.mjs --url <preview> --out meshes.json --driver <playwright> --browser <chromium>` then
+   (the driver also resolves from `$IMG2THREEJS_PLAYWRIGHT` or an installed `playwright`; it fails closed rather than writing an empty meshes.json a gate would read as clean) then
    `forge/stage4_review/self_intersection.py meshes.json --json`
    `forge/stage4_review/attachment_anchor.py object-sculpt-spec.json --measured measured.json --json`
    All three exit `0` clean / `1` gate failure / `2` error. A failure blocks `continue` for the pass
@@ -482,7 +483,7 @@ evidence caused it, what still differs, and choose exactly one next action:
   returned objective and optional selected raw fidelity are explicit, and each copied record has
   candidate/reference/render provenance. It lazily loads the default evaluator and returns
   normalized raw-fidelity correction-loop provenance without mutating sources.
-- **Tier 1 (legacy, still valid)**: "Tier 2 (AI-vision) never runs against a render that has not passed Tier 1." Run `forge/stage4_review/diagnose_render.py` (silhouette IoU/proportion/symmetry/per-part color) and record it (`--spec ... --in-place`) before requesting a comparison sheet; `orchestrate_passes.py check` refuses otherwise.
+- **Tier 1 (legacy, still valid)**: "Tier 2 (AI-vision) never runs against a render that has not passed Tier 1." `diagnose_render.py` also reports `alignedIoU` — the best IoU under a pure translation — so a mis-framed render is not mistaken for a wrong shape; it is report-only and never rescues the hard gate. Run `forge/stage4_review/diagnose_render.py` (silhouette IoU/proportion/symmetry/per-part color) and record it (`--spec ... --in-place`) before requesting a comparison sheet; `orchestrate_passes.py check` refuses otherwise.
 - **Pre-spec / strict-quality**: blocks code gen until the spec is deep enough for its contract.
 - **Screenshot feedback**: `continue` is allowed only with a render + comparison sheet + global
   AI-vision score ≥ threshold (default 0.7) AND every critical feature ≥ its own threshold.
