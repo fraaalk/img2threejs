@@ -426,10 +426,11 @@ item: silhouette, proportions, edge profile, hardware layout, coating colour, pa
 wear, roughness response, and camera framing. Every decision must be traceable to evidence or be
 labelled as an approximation.
 
-The initial CS2 family boundary covers supported **knife** subtypes and the **Glock-18** pistol
-adapter. Rifle, SMG, sniper, heavy, glove, unsupported pistol, and unknown knife subtypes must stop
-with `unsupported-family` or `unsupported-subtype`; they must not receive another family's component
-tree as a generic fallback.
+The versioned CS2 family boundary covers supported **knife** subtypes, the existing **Glock-18**
+pistol adapter, and (after its evidence gates pass) static full-finger **Sport Gloves** through
+`wearable-v1.0` / `cs2-glove-v1`. Rifle, SMG, sniper, heavy, unsupported pistol, non-Sport glove
+subtypes, and unknown knife subtypes must stop with `unsupported-family` or
+`unsupported-subtype`; they must not receive another family's component tree as a generic fallback.
 
 ### Layer contract
 
@@ -566,9 +567,11 @@ evidence caused it, what still differs, and choose exactly one next action:
   strict-quality requires a filled `anatomy` block (head-units, proportions, face landmarks) and
   character feature targets. Suitability routing for humans: `grimoire/intake/validation_rubric.md`
   (stylized vs maximum-likeness). Stylized bust, not a face-copy; refine positions per reference.
-The initial CS2 family boundary is **knife only**. Pistol, rifle, SMG, sniper, heavy, glove, and
-unknown knife subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not
-receive the knife component tree as a generic fallback.
+The initial CS2 family boundary is versioned by adapter track: existing knife/pistol behavior is
+preserved, while static full-finger Sport Gloves use the dedicated `wearable-v1.0` track and
+`cs2-glove-v1` adapter. Rifle, SMG, sniper, heavy, non-Sport glove subtypes, and unknown knife
+subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not receive the
+knife component tree as a generic fallback.
 
 For every CS2 reconstruction, MUST read the full layer contract, intake order, and surface/review
 rule in `grimoire/intake/cs2_intake_contract.md` before intake state can advance.

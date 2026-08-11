@@ -9,9 +9,11 @@ item: silhouette, proportions, edge profile, hardware layout, coating colour, pa
 wear, roughness response, and camera framing. Every decision must be traceable to evidence or be
 labelled as an approximation.
 
-The initial CS2 family boundary is **knife only**. Pistol, rifle, SMG, sniper, heavy, glove, and
-unknown knife subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not
-receive the knife component tree as a generic fallback.
+The CS2 family boundary is versioned by adapter track: existing knife/pistol behavior is preserved,
+while static full-finger `sport-gloves` uses `wearable-v1.0` and `cs2-glove-v1` after its evidence
+gates pass. Rifle, SMG, sniper, heavy, non-Sport glove subtypes, and unknown knife subtypes must
+stop with `unsupported-family` or `unsupported-subtype`; they must not receive another family's
+component tree as a generic fallback.
 
 ## When to build `cs2-intake.json`
 
@@ -58,8 +60,10 @@ The canonical hand-off is `cs2-intake.json` (`schemaVersion: 1`). Its state is o
      stated priority.
    Exactness is `image-only`, `metadata-assisted`, or `exact-texture`; changing route must not
    silently upgrade or downgrade the evidence tier.
-6. Select the knife adapter only after family/subtype validation. Record painted regions, unpainted
-   substrate, visible hardware, hidden-region confidence, and every approximation in the spec.
+6. Select the family adapter only after family/subtype validation. Route Sport Gloves through the
+   staged wearable adapter and sewn-panel assembly; record panel regions, seam/attachment evidence,
+   hidden-region confidence, and every approximation in the spec. Record painted regions and
+   unpainted substrate for weapon families.
 7. For projection, solve the camera and de-light the source first. Projected pixels provide colour
    evidence, not automatic geometry truth; geometry still comes from the adapter and silhouette
    review.

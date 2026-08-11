@@ -99,6 +99,9 @@ class MaterialPipelineTest(unittest.TestCase):
         spec = apply_material_analysis(spec, analysis)
         self.assertEqual(spec["materialPipeline"]["status"], "proceed")
         self.assertEqual(spec["materials"][0]["referenceMaterialId"], "coating.painted-metal")
+        self.assertTrue(spec["materials"][0]["roughness"].get("map"))
+        self.assertTrue(spec["materials"][0]["ambientOcclusion"].get("map"))
+        self.assertEqual({band["id"] for band in spec["materials"][0]["surfaceFrequencyBands"]}, {"macro", "meso", "micro"})
         compatibility = check_compatibility(spec)
         self.assertTrue(compatibility["passed"], compatibility)
 

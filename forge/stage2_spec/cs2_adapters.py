@@ -140,6 +140,18 @@ _ADAPTERS_BY_ID = {
 
 FAMILY_ALIASES = {"sniper": "rifle"}
 
+_GLOVE = FamilyAdapter(
+    "glove", "sport-gloves",
+    ("sewn-panel-surface", "paired-seam-loops", "inflated-conforming-shell", "manifold-main-shell"),
+    ("palm-leather", "dorsal-textile", "finger-stalls", "thumb-saddle", "cuff", "guards-and-overlays"),
+    ("leather-or-textile", "padding", "rubberized-guard", "closure-hardware", "surface-finish"),
+    ("palm-dorsal-volume", "five-finger-stalls", "fourchettes-gussets", "thumb-saddle", "cuff-opening", "seam-continuity"),
+    ("panel-to-panel-seam", "finger-stall-to-fourchette", "thumb-to-palm", "cuff-to-shell", "overlay-to-shell"),
+    ("dorsal", "palmar", "thumb-side-profile", "three-quarter", "left-three-quarter", "right-three-quarter", "orbit"),
+)
+SUPPORTED_GLOVE_SUBTYPES = frozenset({"sport-gloves"})
+STAGED_ADAPTERS = {"glove": (_GLOVE, SUPPORTED_GLOVE_SUBTYPES)}
+
 
 def registered_adapter_ids(family: str, subtype: str | None = None) -> tuple[str, ...]:
     """Return concrete adapter ids for a canonical family/subtype.
@@ -180,3 +192,39 @@ def get_family_adapter(
     if subtype and subtype not in supported:
         raise ValueError(f"unsupported-subtype: {subtype}")
     return adapter if subtype is None else replace(adapter, subtype=subtype, family=canonical_family)
+
+
+def resolve_family_adapter(family: str, subtype: str | None = None, *, staged: bool = False) -> FamilyAdapter:
+    """Resolve an adapter for a build stage without activating production routing."""
+    registry = dict(_ADAPTERS)
+    if staged:
+        registry.update(STAGED_ADAPTERS)
+    entry = registry.get(family)
+    if entry is None:
+        raise ValueError(f"unsupported-family: {family}")
+    adapter, supported = entry
+    if subtype and subtype not in supported:
+        raise ValueError(f"unsupported-subtype: {subtype}")
+    return adapter if subtype is None else replace(adapter, subtype=subtype, family=family)
+
+
+def register_staged_adapter(family: str) -> None:
+    """Activate only after the end-to-end glove gates have passed."""
+    if family not in STAGED_ADAPTERS:
+        raise ValueError(f"no staged adapter for {family}")
+    _ADAPTERS[family] = STAGED_ADAPTERS[family]
+
+
+def activate_staged_adapter_after_review(family: str, review_report: dict[str, Any]) -> None:
+    """Production activation requires a ready review report and a bound model digest."""
+    if not isinstance(review_report, dict) or review_report.get("verdict") != "ready":
+        raise ValueError("adapter activation requires a ready review report")
+    if not isinstance(review_report.get("modelBundleDigest"), str) or not review_report["modelBundleDigest"]:
+        raise ValueError("adapter activation requires a model bundle digest")
+    register_staged_adapter(family)
+
+
+def disable_staged_adapter(family: str) -> None:
+    """Rollback hook: restore the pre-activation unsupported-family boundary."""
+    if family in STAGED_ADAPTERS:
+        _ADAPTERS.pop(family, None)

@@ -1439,6 +1439,8 @@ CS2_RIFLE_SUBTYPES = frozenset({"awp"})
 
 
 def make_cs2_component_tree(item_family: str = "knife", subtype: str | None = None) -> list:
+    if item_family == "glove":
+        return make_glove_component_tree(subtype)
     if item_family not in {"knife", "rifle"}:
         raise ValueError(f"unsupported CS2 family {item_family!r}; supported families are knife and rifle")
     if item_family == "knife" and subtype and subtype not in CS2_KNIFE_SUBTYPES:
@@ -1499,9 +1501,8 @@ def make_cs2_component_tree(item_family: str = "knife", subtype: str | None = No
     return [root, *parts]
 
 
-def make_cs2_feature_targets(item_family: str = "knife") -> list:
-    if item_family == "rifle":
-        return [
+def _make_cs2_rifle_feature_targets() -> list:
+    return [
             {"id": "awp-silhouette", "name": "AWP silhouette and proportions", "tier": "critical",
              "passIds": ["blockout"], "minimumScore": 0.82, "mustPass": True,
              "componentRefs": ["root", "receiver", "stock", "barrel"], "evidenceRefs": ["front-medusa.webp", "back-medusa.webp"]},
@@ -1520,7 +1521,337 @@ def make_cs2_feature_targets(item_family: str = "knife") -> list:
             {"id": "awp-wear-read", "name": "Minimal Wear edge response", "tier": "important",
              "passIds": ["surface-pass"], "minimumScore": 0.65, "mustPass": False,
              "componentRefs": ["receiver", "stock", "muzzle"], "evidenceRefs": ["front-medusa.webp"]},
-        ]
+    ]
+
+def _glove_material(material_id: str, name: str, color: str, roughness: float, *, double_sided: bool = False) -> dict:
+    return {
+        "id": material_id,
+        "name": name,
+        "type": "standard",
+        "baseColor": color,
+        "color": color,
+        "colorVariation": {"palette": [color], "pattern": "evidence-bound", "amplitude": 0.0, "heightCorrelation": 0.0},
+        "albedo": {"dominant": color, "secondary": []},
+        "roughness": {"base": roughness, "variation": 0.08, "map": f"fixture://glove-sport-v1/{material_id}_roughness.png"},
+        "metalness": 0.0,
+        "opacity": {"base": 1.0},
+        "doubleSided": double_sided,
+        "qualityTier": "reference",
+        "textureResolution": 2048,
+        "textureProjection": {"mode": "reference-multi-view", "texelDensityIntent": "normalized-panel-space", "repeat": [1, 1], "anisotropy": 4},
+        "surfaceFrequencyBands": [
+            {"id": "macro", "frequency": 2.0, "amplitude": 0.18, "description": "panel silhouette and cuff volume"},
+            {"id": "meso", "frequency": 12.0, "amplitude": 0.08, "description": "grain, padding, seam piping"},
+            {"id": "micro", "frequency": 56.0, "amplitude": 0.025, "description": "wear mask and textile response"},
+        ],
+        "ambientOcclusion": {"map": f"fixture://glove-sport-v1/{material_id}_ao.png", "source": "geometry-derived"},
+        "normal": {"map": f"fixture://glove-sport-v1/{material_id}_normal.png", "source": "authored-height"},
+        "localOverrides": [{"id": f"{material_id}-wear", "roughness": min(0.28, roughness), "source": "golden-fixture"}],
+        "referencePbr": {
+            "usable": True,
+            "confidence": 0.82,
+            "maps": {
+                "albedo": {"path": f"fixture://glove-sport-v1/{material_id}_albedo.png"},
+                "roughness": {"path": f"fixture://glove-sport-v1/{material_id}_roughness.png"},
+                "height": {"path": f"fixture://glove-sport-v1/{material_id}_height.png"},
+                "normal": {"path": f"fixture://glove-sport-v1/{material_id}_normal.png"},
+                "ao": {"path": f"fixture://glove-sport-v1/{material_id}_ao.png"},
+            },
+        },
+        "wear": {"edgeWear": {"base": 0.08}, "scratches": "bounded-evidence-mask"},
+        "dirt": {"amount": {"base": 0.04}, "cavityBias": {"base": 0.12}},
+        "channels": {
+            "albedo": {"source": "golden-reference-or-observed", "colorSpace": "srgb"},
+            "roughness": {"source": "material-evidence", "colorSpace": "linear"},
+            "normal": {"source": "geometry-or-authored-height", "colorSpace": "linear"},
+            "ao": {"source": "geometry-derived", "colorSpace": "linear"},
+        },
+        "notes": "Glove material channels remain independent; finish cannot replace panel geometry.",
+    }
+
+
+def _glove_panel_node(component_id: str, name: str, role: str, material: str, level: str, importance: float, *, parent: str = "root", panel_id: str | None = None, seam_ids: list[str] | None = None) -> dict:
+    node = _cnode(
+        component_id,
+        name,
+        "plane-card",
+        parent,
+        (0.0, 0.0, 0.0),
+        (1.0, 1.0, 0.08),
+        material=material,
+        role=role,
+        level=level,
+        importance=importance,
+        topology_class="conforming-shell",
+        topology_rationale="A sewn glove panel is a thin pattern piece lifted onto a normalized hand underform; it is not a rigid primitive volume.",
+        local_features=["panel-boundary", "pattern-space-uv", "seam-ownership"],
+    )
+    descriptor = node["geometryDescriptor"]
+    descriptor.update({
+        "topologyIntent": "sewn pattern panel",
+        "uvStrategy": "pattern-space UV0 owned by panel",
+        "panelId": panel_id or component_id,
+        "seamIds": list(seam_ids or []),
+        "route": "panel-seam-surface",
+        "authoritative": True,
+    })
+    node["seams"] = [{"id": seam_id, "mode": "production", "owner": component_id} for seam_id in seam_ids or []]
+    node["actionProfile"]["sockets"] = [{"id": f"{component_id}-socket", "localPosition": [0.0, 0.0, 0.0], "localRotation": [0.0, 0.0, 0.0]}]
+    node["colorMaterialRecipe"] = {
+        "dominantAlbedo": "rgba(23, 25, 27, 1.0)",
+        "secondaryAlbedo": "rgba(54, 57, 61, 1.0)",
+        "materialClass": "fabric" if "textile" in material else ("rubber" if "guard" in material else "plastic"),
+        "materialClassConfidence": 0.82,
+        "colorGradient": {"type": "linear", "stops": [{"position": 0.0, "color": "rgba(23, 25, 27, 1.0)"}, {"position": 1.0, "color": "rgba(54, 57, 61, 1.0)"}]},
+        "evidenceRefs": ["glove-evidence-shell-regions"],
+    }
+    return node
+
+
+def _glove_volume_node(component_id: str, name: str, primitive: str, position: tuple[float, float, float],
+                       scale: tuple[float, float, float], *, material: str, role: str, level: str,
+                       rotation: tuple[float, float, float] = (0.0, 0.0, 0.0), importance: float = 0.7) -> dict:
+    """A real hand-volume component, deliberately never a camera-facing texture card."""
+    node = _cnode(
+        component_id, name, primitive, "root", position, scale, material=material, role=role,
+        level=level, rotation=rotation, importance=importance, topology_class="assembled-solid",
+        topology_rationale="A sport glove needs separable volumetric regions for silhouette and multi-angle review.",
+        local_features=["volumetric-glove-layout", "evidence-ready-material-region", "pattern-space-uv"],
+    )
+    node["geometryDescriptor"].update({"topologyIntent": "volumetric sport-glove blockout", "route": "underform-lift", "authoritative": role in {"palm-shell", "dorsal-shell", "finger-stall", "thumb-saddle", "cuff"}})
+    node["actionProfile"]["sockets"] = [{"id": f"{component_id}-socket", "localPosition": [0.0, 0.0, 0.0], "localRotation": [0.0, 0.0, 0.0]}]
+    material_class = "rubber" if "guard" in material or "mint" in material else ("fabric" if "dorsal" in material or "textile" in material or "green" in material else "unknown")
+    node["colorMaterialRecipe"] = {
+        "dominantAlbedo": "rgba(36, 42, 39, 1.0)", "secondaryAlbedo": "rgba(111, 129, 112, 1.0)",
+        "materialClass": material_class, "materialClassConfidence": 0.78,
+        "colorGradient": {"type": "linear", "stops": [{"position": 0.0, "color": "rgba(36, 42, 39, 1.0)"}, {"position": 1.0, "color": "rgba(111, 129, 112, 1.0)"}]},
+        "evidenceRefs": ["glove-evidence-shell-regions"],
+    }
+    return node
+
+
+def _glove_shell_profile(mirror: float) -> list[list[float]]:
+    """Observed full-finger sport-glove dorsal envelope in local XY space.
+
+    The path is deliberately continuous through the palm, webbing, and thumb saddle.  It avoids
+    the visually false ``four floating ellipsoids`` failure while leaving panel overlays as
+    independent parts.  The right glove is an explicit reflected/winding-corrected counterpart.
+    """
+    canonical = [
+        (-0.42, -0.80), (0.42, -0.80), (0.49, -0.42), (0.49, 0.04),
+        (0.43, 0.31), (0.42, 0.78), (0.41, 0.90), (0.38, 0.99), (0.33, 1.04),
+        (0.28, 1.04), (0.24, 0.99), (0.22, 0.43), (0.15, 0.36), (0.15, 1.03),
+        (0.14, 1.13), (0.10, 1.20), (0.04, 1.23), (-0.02, 1.20), (-0.05, 1.13),
+        (-0.05, 0.39), (-0.12, 0.35), (-0.13, 1.06), (-0.15, 1.18), (-0.19, 1.26),
+        (-0.26, 1.28), (-0.32, 1.24), (-0.35, 1.16), (-0.31, 0.38), (-0.39, 0.34),
+        (-0.40, 1.02), (-0.42, 1.13), (-0.47, 1.19), (-0.53, 1.18), (-0.58, 1.11),
+        (-0.55, 0.32), (-0.62, 0.19),
+        (-0.78, 0.17), (-0.92, 0.04), (-0.94, -0.14), (-0.88, -0.29), (-0.74, -0.22),
+        (-0.62, -0.06), (-0.56, -0.28), (-0.49, -0.57),
+    ]
+    points = [[round(mirror * x, 4), y] for x, y in canonical]
+    return points if mirror < 0 else list(reversed(points))
+
+
+def _glove_shell_node(component_id: str, name: str, center_x: float, mirror: float, material: str) -> dict:
+    node = _glove_volume_node(component_id, name, "extrude", (center_x, 0.0, -0.06), (1.0, 1.0, 1.0), material=material, role="dorsal-shell", level="macro", importance=1.0)
+    node["geometryDescriptor"]["profile2D"] = {"points": _glove_shell_profile(mirror), "depth": 0.24}
+    node["geometryDescriptor"]["topologyIntent"] = "single continuous glove dorsal envelope with thumb and finger-web negative spaces"
+    node["topologyClass"] = "conforming-shell"
+    node["topologyRationale"] = "The observed dorsal surface is one sewn, continuous glove shell from cuff through the four fingers and thumb saddle, not separate floating volumes."
+    return node
+
+
+def _glove_palm_profile() -> list[list[float]]:
+    """The observed palm/cuff envelope: flatter flanks than an ellipsoid, with only modest rounding."""
+    return [
+        [-0.28, -0.62], [0.28, -0.62], [0.31, -0.48], [0.37, 0.12],
+        [0.32, 0.31], [0.22, 0.42], [-0.20, 0.42], [-0.31, 0.32],
+        [-0.37, 0.13], [-0.31, -0.47],
+    ]
+
+
+def _glove_palm_node(component_id: str, name: str, center_x: float, material: str, role: str) -> dict:
+    node = _glove_volume_node(component_id, name, "extrude", (center_x, -0.02, -0.06), (1.0, 1.0, 1.0), material=material, role=role, level="macro", importance=1.0)
+    node["geometryDescriptor"]["profile2D"] = {"points": _glove_palm_profile(), "depth": 0.26}
+    node["geometryDescriptor"]["topologyIntent"] = "sewn palm/dorsal panel envelope with straight cuff flanks and rounded knuckle transition"
+    node["topologyClass"] = "conforming-shell"
+    node["topologyRationale"] = "The observed glove palm is a sewn panel with long near-vertical flanks and a cuff seam, not a spherical mitten volume."
+    return node
+
+
+def _glove_cuff_node(component_id: str, name: str, center_x: float, mirror: float, material: str) -> dict:
+    """Tapered cuff that splays outward from the pair centre at the wrist."""
+    node = _glove_volume_node(component_id, name, "extrude", (center_x + mirror * 0.045, -0.63, 0.00), (1.0, 1.0, 1.0), material=material, role="cuff", level="macro", rotation=(0.0, 0.0, mirror * 0.19), importance=0.88)
+    node["geometryDescriptor"]["profile2D"] = {
+        "points": [[-0.20, -0.24], [0.20, -0.24], [0.24, 0.08], [0.29, 0.25], [-0.29, 0.25], [-0.24, 0.08]],
+        "depth": 0.30,
+    }
+    node["geometryDescriptor"]["topologyIntent"] = "tapered sewn sport-glove cuff with wrist seam overlap"
+    node["topologyClass"] = "conforming-shell"
+    node["topologyRationale"] = "The source cuff narrows toward the wrist and splays outward from the pair centre; treating it as a centered rectangular armor block overfills the lower silhouette."
+    return node
+
+
+def _sport_glove_hand_nodes(side: str, center_x: float, palette: dict[str, str]) -> list[dict]:
+    """Build a mirrored full-finger hand; the left retains legacy IDs for evidence bindings."""
+    prefix = "" if side == "left" else "right-"
+    mirror = -1.0 if side == "left" else 1.0
+    ident = lambda name: f"{prefix}{name}"
+    label = lambda name: name if side == "left" else f"Right {name}"
+    nodes = [
+        _glove_palm_node(ident("palm-panel"), label("palm panel"), center_x, palette["palm"], "palm-shell"),
+        _glove_palm_node(ident("dorsal-panel"), label("dorsal panel"), center_x, palette["dorsal"], "dorsal-shell"),
+        _glove_volume_node(ident("thumb-saddle"), label("thumb saddle"), "ellipsoid", (center_x + mirror * 0.36, 0.40, 0.04), (0.17, 0.60, 0.20), material=palette["thumb"], role="thumb-saddle", level="macro", rotation=(0.0, 0.0, mirror * -0.32), importance=0.95),
+        _glove_cuff_node(ident("cuff"), label("cuff opening"), center_x, mirror, palette["green"]),
+    ]
+    for finger, offset, length, width, bend in (("index", -0.23, 0.49, 0.11, -0.16), ("middle", -0.075, 0.67, 0.13, -0.20), ("ring", 0.08, 0.55, 0.12, -0.24), ("pinky", 0.23, 0.42, 0.10, -0.30)):
+        nodes.extend((
+            _glove_volume_node(ident(f"{finger}-stall"), label(f"{finger} finger stall"), "ellipsoid", (center_x + offset, 0.56, 0.10), (width, length * 0.75 + 0.25, 0.19), material=palette["dorsal"], role="finger-stall", level="meso", rotation=(bend * 0.35, 0.0, 0.0), importance=0.90),
+            _glove_volume_node(ident(f"{finger}-tip"), label(f"{finger} curved fingertip (integrated into stall blockout)"), "box", (center_x, 0.0, 0.0), (0.001, 0.001, 0.001), material="hidden", role="finger-tip-overlay", level="meso", rotation=(bend * 0.6, 0.0, 0.0), importance=0.82),
+            _glove_volume_node(ident(f"{finger}-fourchette"), label(f"{finger} fourchette"), "box", (center_x + offset + 0.075, 0.58, 0.03), (0.020, length * 0.55, 0.16), material=palette["grey"], role="fourchette-gusset", level="meso", importance=0.62),
+        ))
+    nodes.extend((
+        _glove_volume_node(ident("thumb-fourchette"), label("thumb fourchette (deferred)"), "box", (center_x, 0.0, 0.0), (0.001, 0.001, 0.001), material="hidden", role="fourchette-gusset", level="meso", importance=0.75),
+        _glove_volume_node(ident("finger-fourchettes"), label("finger fourchette bridge (owned by shell in blockout)"), "box", (center_x, 0.0, 0.0), (0.001, 0.001, 0.001), material="hidden", role="fourchette-gusset", level="meso", importance=0.76),
+        _glove_volume_node(ident("knuckle-guard"), label("central knuckle guard"), "box", (center_x - 0.08, 0.38, 0.25), (0.045, 0.36, 0.028), material=palette["mint"], role="guard-overlay", level="meso", rotation=(-0.13, 0.0, 0.0), importance=0.80),
+        _glove_volume_node(ident("palm-padding"), label("palm padding layer"), "ellipsoid", (center_x, -0.02, -0.23), (0.50, 0.62, 0.045), material=palette["palm"], role="padding-overlay", level="meso", importance=0.72),
+        _glove_volume_node(ident("dorsal-padding"), label("radial dorsal wrap"), "box", (center_x + mirror * 0.27, -0.02, 0.23), (0.09, 0.58, 0.032), material=palette["green"], role="padding-overlay", level="meso", rotation=(0.0, 0.0, mirror * 0.11), importance=0.85),
+        _glove_volume_node(ident("thumb-padding"), label("thumb protective pad (unobserved overlay withheld)"), "box", (center_x, 0.0, 0.0), (0.001, 0.001, 0.001), material="hidden", role="padding-overlay", level="meso", importance=0.70),
+        _glove_volume_node(ident("cuff-binding"), label("cuff edge binding"), "box", (center_x + mirror * 0.075, -0.82, 0.16), (0.48, 0.06, 0.055), material=palette["mint"], role="edge-binding", level="meso", importance=0.65),
+        _glove_volume_node(ident("seam-piping"), label("raised dorsal seam piping"), "box", (center_x - mirror * 0.25, 0.03, 0.18), (0.006, 0.66, 0.018), material=palette["mint"], role="seam-piping", level="meso", importance=0.66),
+        _glove_volume_node(ident("closure-strap"), label("cuff closure strap"), "box", (center_x + mirror * 0.18, -0.63, 0.21), (0.33, 0.12, 0.06), material=palette["closure"], role="closure-overlay", level="micro", importance=0.70),
+    ))
+    for index, offset in enumerate((-0.24, -0.08, 0.09, 0.25)):
+        nodes.append(_glove_volume_node(ident(f"dorsal-guard-{index + 1}"), label(f"dorsal guard {index + 1}"), "box", (center_x + offset, 0.66, 0.23), (0.038, 0.30, 0.022), material=palette["mint"], role="guard-overlay", level="micro", rotation=(-0.18 - index * 0.025, 0.0, 0.0), importance=0.68))
+    return nodes
+
+
+def make_glove_component_tree(subtype: str | None = None, *, materials: dict[str, str] | None = None) -> list:
+    if subtype and subtype != "sport-gloves":
+        raise ValueError(f"unsupported glove subtype {subtype!r}")
+    palette = {"palm": "glove-leather", "dorsal": "glove-textile", "thumb": "glove-textile", "green": "glove-textile", "mint": "glove-guard", "grey": "glove-leather", "closure": "glove-closure"}
+    palette.update(materials or {})
+    root = _cnode("root", "Sport Gloves pair (root)", "box", None, (0, 0, 0), (0.01, 0.01, 0.01), material="hidden", role="body", level="macro", importance=1.0, anim_role="root", topology_class="material-only", topology_rationale="The root is an invisible organizing pivot; glove surfaces are owned by volumetric children.")
+    return [root, *_sport_glove_hand_nodes("left", -0.48, palette), *_sport_glove_hand_nodes("right", 0.48, palette)]
+
+
+def apply_glove_pair_layout(spec: dict) -> dict:
+    """Upgrade a legacy glove spec to the reusable volumetric full-finger pair layout."""
+    material_ids = {item.get("id") for item in spec.get("materials", []) if isinstance(item, dict)}
+    observed = {"hedge-dorsal-carbon", "hedge-mint-guard", "hedge-green-dorsal", "hedge-palm-grey", "hedge-green-palmar", "hedge-closure"}
+    palette = None if not observed.issubset(material_ids) else {"palm": "hedge-palm-grey", "dorsal": "hedge-dorsal-carbon", "thumb": "hedge-green-palmar", "green": "hedge-green-dorsal", "mint": "hedge-mint-guard", "grey": "hedge-palm-grey", "closure": "hedge-closure"}
+    spec["componentTree"] = make_glove_component_tree("sport-gloves", materials=palette)
+    spec["gloveLayout"] = {"version": "sport-glove-volumetric-pair.v1", "formProfile": "full-finger", "digitTopology": "two-segment-curved-digits", "hands": ["left", "right"], "evidencePolicy": "generic geometry; source-specific finish remains material-evidence-bound"}
+    return spec
+
+
+def make_glove_feature_targets() -> list:
+    return [
+        {"id": "glove-silhouette", "name": "Full-hand and cuff silhouette", "tier": "critical", "passIds": ["blockout"], "minimumScore": 0.82, "mustPass": True, "componentRefs": ["palm-panel", "dorsal-panel", "cuff"], "evidenceRefs": ["dorsal", "palmar", "three-quarter"]},
+        {"id": "glove-finger-stalls", "name": "Five stalls, fourchettes and spacing", "tier": "critical", "passIds": ["structure-pass"], "minimumScore": 0.82, "mustPass": True, "componentRefs": ["index-stall", "middle-stall", "ring-stall", "pinky-stall", "finger-fourchettes"], "evidenceRefs": ["dorsal", "palmar"]},
+        {"id": "glove-thumb-saddle", "name": "Thumb saddle orientation and attachment", "tier": "critical", "passIds": ["structure-pass"], "minimumScore": 0.8, "mustPass": True, "componentRefs": ["thumb-saddle", "thumb-fourchette"], "evidenceRefs": ["thumb-side-profile", "three-quarter"]},
+        {"id": "glove-seam-continuity", "name": "Panel seam continuity and cuff closure", "tier": "critical", "passIds": ["structure-pass"], "minimumScore": 0.8, "mustPass": True, "componentRefs": ["palm-panel", "dorsal-panel", "cuff"], "evidenceRefs": ["palmar", "dorsal"]},
+        {"id": "glove-asymmetry", "name": "Handedness and evidence-backed asymmetry", "tier": "critical", "passIds": ["handedness-pass"], "minimumScore": 0.8, "mustPass": True, "componentRefs": ["root", "closure-strap"], "evidenceRefs": ["three-quarter", "right-three-quarter"]},
+        {"id": "glove-surface-response", "name": "Independent textile/leather surface channels", "tier": "important", "passIds": ["surface-pass"], "minimumScore": 0.7, "mustPass": False, "componentRefs": ["glove-leather", "glove-textile"], "evidenceRefs": ["dorsal", "palmar"]},
+    ]
+
+
+def apply_glove_template(spec: dict, *, subtype: str = "sport-gloves", manifest: dict | None = None) -> dict:
+    if subtype != "sport-gloves":
+        raise ValueError(f"unsupported glove subtype {subtype!r}")
+    apply_glove_pair_layout(spec)
+    root = next(component for component in spec["componentTree"] if component.get("id") == "root")
+    root["topologyClass"] = "material-only"
+    root["topologyRationale"] = "The root is an invisible organizing pivot; authoritative glove surfaces are owned by panel children."
+    spec["materials"] = [
+        _glove_material("glove-leather", "Leather shell", "#17191b", 0.72),
+        _glove_material("glove-textile", "Textile dorsal", "#25282b", 0.86),
+        _glove_material("glove-guard", "Rubberized guard", "#0d0f10", 0.62),
+        _glove_material("glove-closure", "Closure hardware", "#303236", 0.48),
+        {**_cs2_hidden_material(), "qualityTier": "utility"},
+    ]
+    spec["featureReviewTargets"] = make_glove_feature_targets()
+    spec["wearable"] = {
+        "track": "wearable-v1.0",
+        "template": "glove-shell-v1",
+        "subtype": subtype,
+        "canonicalHand": "left",
+        "output": "static-pair",
+        "scale": "normalized",
+        "productionRoute": "panel-seam-surface",
+        "supportingRoutes": ["underform-lift", "bounded-sdf-padding", "overlay-geometry", "material-only-detail"],
+    }
+    pre = spec.setdefault("preSpecAssessment", {})
+    oc = pre.setdefault("objectClass", {})
+    oc.update({
+        "primaryType": "wearable-item",
+        "primaryDomain": "object",
+        "formLanguage": ["sewn-wearable", "conforming-shell", "layered-overlays"],
+        "structureKind": ["panel-assembly", "finger-stalls", "fourchettes", "thumb-saddle", "cuff"],
+        "motionPotential": ["static", "inspect-orbit"],
+        "materialFamilies": ["leather", "textile", "rubberized-polymer", "hardware"],
+        "cs2": True,
+        "itemFamily": "glove",
+        "subtype": subtype,
+    })
+    complexity = pre.setdefault("complexity", {})
+    complexity["tier"] = "ultra-complex"
+    decision = pre.setdefault("specDepthDecision", {})
+    decision.update({"requiredDepth": "ultra-complex", "needsRepetitionSystems": True, "needsMaterialLocalOverrides": True, "minimumComponentLevels": ["macro", "meso", "micro"]})
+    inv = pre.setdefault("detailInventory", {})
+    inv["targetMinDetails"] = 16
+    inv.setdefault("details", [])
+    required_details = [
+        ("finger-stall-spacing", "contour", "index-stall"),
+        ("fourchette-boundaries", "seam", "finger-fourchettes"),
+        ("thumb-saddle", "contour", "thumb-saddle"),
+        ("cuff-opening", "contour", "cuff"),
+        ("seam-piping", "stitch", "seam-piping"),
+        ("knuckle-guard", "bevel", "knuckle-guard"),
+        ("closure-strap", "linework", "closure-strap"),
+        ("palm-grip-zones", "ridge", "palm-panel"),
+        ("dorsal-textile", "groove", "dorsal-panel"),
+        ("panel-uvs", "linework", "pattern-space-uv"),
+        ("handedness", "contour", "root"),
+        ("right-hand-overrides", "contour", "root"),
+        ("edge-binding", "stitch", "cuff-binding"),
+        ("padding-volume", "bevel", "palm-padding"),
+        ("wear-mask", "stain", "glove-leather-wear"),
+        ("material-channel-provenance", "linework", "glove-textile"),
+    ]
+    for index, detail in enumerate(required_details):
+        if not any(isinstance(item, dict) and item.get("id") == f"glove-detail-{index + 1}" for item in inv["details"]):
+            name, kind, ref = detail
+            inv["details"].append({"id": f"glove-detail-{index + 1}", "name": name, "kind": kind, "mapsTo": {"ref": ref}, "evidenceRefs": ["glove-research", "golden-fixture"], "epistemicState": "implementation"})
+    spec["repetitionSystems"] = [
+        {"id": "glove-seam-repeat", "name": "Repeated seam and stitch route", "realization": "geometry", "buildsGeometry": True, "geometry": {"source": "seamGraph", "instanceCount": 12}, "componentRefs": ["seam-piping", "finger-fourchettes"]},
+        {"id": "glove-finger-repeat", "name": "Finger stall/fourchette family", "realization": "instanced-component-family", "buildsGeometry": True, "instances": ["index-stall", "middle-stall", "ring-stall", "pinky-stall"], "componentRefs": ["finger-fourchettes"]},
+    ]
+    spec["lightingFromPhoto"] = [
+        "key exposure: neutral studio key at 1.0 normalized intensity, 45-degree azimuth",
+        "fill exposure: soft neutral fill at 0.45 normalized intensity",
+        "rim/environment: ACES filmic tone mapping with neutral environment reflection",
+        "contact shadow: ambient occlusion and soft ground shadow preserve seam/panel separation",
+    ]
+    contract = spec.setdefault("qualityContract", {})
+    contract["qualityBar"] = "ultra-complex"
+    contract["definitionOfDone"] = [
+        "A texture-free sewn main shell preserves panel/seam/attachment ownership and production manifold policy.",
+        "A deterministic left/right pair is bound to one versioned glove-model-bundle with runtime/review hashes.",
+        "Golden and seeded-negative fixtures pass their owning evidence/geometry/review gates.",
+    ]
+    contract.setdefault("minimumSpecDepth", {}).update({"macroComponents": 5, "mesoComponents": 16, "microFeatureGroups": 8, "materialLayers": 4, "repetitionSystems": 2, "reviewViewpoints": 5})
+    if manifest:
+        spec["gloveIntake"] = {"sourceViews": manifest.get("sourceViews", []), "extension": manifest.get("extensions", {}).get("glove", {}), "primarySourceViewId": manifest.get("primarySourceViewId")}
+    return spec
+
+
+def make_cs2_feature_targets(item_family: str = "knife") -> list:
+    if item_family == "rifle":
+        return _make_cs2_rifle_feature_targets()
+    if item_family == "glove":
+        return make_glove_feature_targets()
     return [
         {"id": "cs2-silhouette", "name": "Weapon silhouette and proportions", "tier": "critical",
          "passIds": ["blockout"], "minimumScore": 0.8, "mustPass": True,
@@ -1559,6 +1890,8 @@ def apply_cs2_template(
     Leaves object specs untouched unless invoked. `finish_style` is treated as the explicit
     descriptor tier; resolve_cs2_finish_style() applies identity precedence against skin_name /
     vision when finish_style is not itself given."""
+    if item_family == "glove":
+        return apply_glove_template(spec, subtype=subtype or "sport-gloves")
     resolved_style, conflicts = resolve_cs2_finish_style(
         finish_style, skin_name, vision_finish_style, vision_confidence
     )
@@ -1677,6 +2010,8 @@ def apply_cs2_manifest_evidence(spec: dict, manifest: dict) -> dict:
         "confidence": manifest.get("confidence", {}),
         "provenance": manifest.get("provenance", {}),
         "warnings": manifest.get("warnings", []),
+        "sourceImage": manifest.get("sourceImage", ""),
+        "deLitAlbedo": manifest.get("deLitAlbedo", manifest.get("sourceImage", "")),
     }
     spec["cs2Intake"] = intake
     spec["componentAdapter"] = manifest.get("componentAdapter")
@@ -1684,6 +2019,14 @@ def apply_cs2_manifest_evidence(spec: dict, manifest: dict) -> dict:
     spec["adapterContractVersion"] = manifest.get("adapterContractVersion")
     spec["adapterFixtureId"] = manifest.get("adapterFixtureId")
     spec["fixtureId"] = manifest.get("adapterFixtureId")
+    if manifest.get("itemFamily") == "glove":
+        spec["sourceViews"] = manifest.get("sourceViews", [])
+        spec["primarySourceViewId"] = manifest.get("primarySourceViewId")
+        spec["extensions"] = spec.get("extensions", {})
+        spec["extensions"]["glove"] = manifest.get("extensions", {}).get("glove", {})
+        spec["sourceImage"] = manifest.get("sourceImage", spec.get("sourceImage", ""))
+        spec.setdefault("wearable", {})["route"] = "wearable-v1.0"
+        return spec
     spec["exactnessTier"] = manifest.get("exactnessTier")
     if isinstance(manifest.get("camera"), dict) and manifest["camera"].get("referenceCamera"):
         spec["referenceCamera"] = manifest["camera"]["referenceCamera"]
@@ -2404,7 +2747,7 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target_name", help="Human-readable object name")
-    parser.add_argument("--image", help="Reference image path or URL")
+    parser.add_argument("--image", action="append", dest="images", default=[], help="Reference image path or URL; repeat for ordered N-view evidence")
     parser.add_argument("--assessment", type=Path, help="Pre-spec assessment JSON from stage2_spec/new_pre_spec_assessment.py")
     parser.add_argument("--manifest", type=Path, help="Validated cs2-intake.json produced by stage1 intake")
     parser.add_argument("--out", type=Path, help="Output JSON path")
@@ -2441,9 +2784,9 @@ def main(argv: list[str]) -> int:
             parser.error("CS2 intake manifest must be a JSON object")
         if manifest.get("state") != "proceed":
             parser.error(f"CS2 intake is not ready for spec authoring: {manifest.get('state', 'unknown')}")
-        if manifest.get("itemFamily") not in {"knife", "rifle"}:
-            parser.error("CS2 spec authoring supports only the activated knife and rifle families")
-    spec = make_spec(args.target_name, args.image, assessment)
+        if manifest.get("itemFamily") not in {"knife", "rifle", "glove"}:
+            parser.error("CS2 spec authoring supports only activated knife, rifle, and sport-gloves families")
+    spec = make_spec(args.target_name, args.images[0] if args.images else None, assessment)
     domain = None
     cs2_marker = False
     if isinstance(assessment, dict):
@@ -2455,8 +2798,8 @@ def main(argv: list[str]) -> int:
     incoming_classification = incoming_routing.get("classification") if isinstance(incoming_routing, dict) else None
     explicit_track = "character-v1.5" if args.character or domain in {"character", "hybrid"} else None
     if explicit_track is None and (args.cs2 or cs2_marker):
-        explicit_track = "weapon-v1.4"
-    legacy_cs2 = manifest is not None and not isinstance(manifest.get("pipelineRouting"), dict)
+        explicit_track = "wearable-v1.0" if manifest and manifest.get("itemFamily") == "glove" else "weapon-v1.4"
+    legacy_cs2 = manifest is not None and manifest.get("itemFamily") != "glove" and not isinstance(manifest.get("pipelineRouting"), dict)
     if manifest is not None and isinstance(manifest.get("pipelineRouting"), dict):
         incoming_classification = manifest["pipelineRouting"].get("classification")
     if args.character and (args.cs2 or manifest is not None) and incoming_classification is None:
@@ -2477,7 +2820,11 @@ def main(argv: list[str]) -> int:
         spec["pipelineRouting"] = routing
         if routing["status"] != "resolved":
             parser.error("pipeline routing requires input: " + "; ".join(routing["conflicts"]))
-    if routing is not None and routing["track"] == "weapon-v1.4":
+    if routing is not None and routing["track"] == "wearable-v1.0":
+        apply_glove_template(spec, subtype=str(manifest.get("subtype", "sport-gloves")) if manifest else "sport-gloves", manifest=manifest)
+        if manifest:
+            apply_cs2_manifest_evidence(spec, manifest)
+    elif routing is not None and routing["track"] == "weapon-v1.4":
         finish_style = args.finish_style
         if finish_style is None and isinstance(assessment, dict):
             oc = assessment.get("preSpecAssessment", {}).get("objectClass", {})

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "license": "MIT",
+  "views": [
+    {
+      "role": "dorsal",
+      "path": "/Users/tamlh/workspaces/self/AI/img2threejs-org/img2/forge/tests/fixtures/glove_sport_v1/dorsal.png",
+      "generated": true
+    },
+    {
+      "role": "palmar",
+      "path": "/Users/tamlh/workspaces/self/AI/img2threejs-org/img2/forge/tests/fixtures/glove_sport_v1/palmar.png",
+      "generated": true
+    },
+    {
+      "role": "thumb-side-profile",
+      "path": "/Users/tamlh/workspaces/self/AI/img2threejs-org/img2/forge/tests/fixtures/glove_sport_v1/thumb-side-profile.png",
+      "generated": true
+    },
+    {
+      "role": "three-quarter",
+      "path": "/Users/tamlh/workspaces/self/AI/img2threejs-org/img2/forge/tests/fixtures/glove_sport_v1/three-quarter.png",
+      "generated": true
+    }
+  ]
+}

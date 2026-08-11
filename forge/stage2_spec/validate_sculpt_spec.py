@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stage3_build"))
 from feature_acceptance_policy import feature_gate_failures, feature_review_policy
@@ -23,6 +25,7 @@ from subdivision import (
 )
 from visual_hull import validate_visual_hull_descriptor
 from pipeline_routing import resolve_pipeline_routing, validate_pipeline_routing
+from forge.stage1_intake.glove_contracts import glove_readiness_errors
 
 try:
     from forge.stage2_spec.cs2_adapters import get_family_adapter
@@ -645,10 +648,14 @@ def validate_cs2_contract(spec: dict[str, Any], errors: list[str], warnings: lis
         errors.append("cs2Intake.route must be a supported CS2 route")
     if tier not in CS2_EXACTNESS_TIERS:
         errors.append("cs2Intake.exactnessTier must be a supported exactness tier")
-    if intake.get("itemFamily") not in {"knife", "rifle"}:
-        errors.append("cs2Intake requires an activated knife or rifle adapter")
+    if intake.get("itemFamily") not in {"knife", "rifle", "glove"}:
+        errors.append("cs2Intake requires an activated knife, rifle, or staged glove adapter")
     adapter = intake.get("componentAdapter")
-    if intake.get("itemFamily") == "rifle":
+    if intake.get("itemFamily") == "glove":
+        wearable = spec.get("wearable")
+        if not isinstance(wearable, dict) or wearable.get("template") != "glove-shell-v1":
+            errors.append("glove cs2Intake requires the glove-shell-v1 template")
+    elif intake.get("itemFamily") == "rifle":
         if not isinstance(adapter, str):
             errors.append("rifle cs2Intake requires a registered componentAdapter")
         else:
@@ -683,8 +690,11 @@ def validate_cs2_contract(spec: dict[str, Any], errors: list[str], warnings: lis
         errors.append("knife cs2Intake has a mismatched componentAdapter")
     if route == "reference-projection":
         camera = spec.get("referenceCamera")
-        source = intake.get("deLitAlbedo") or intake.get("sourceImage")
-        if not isinstance(camera, dict) or camera.get("solved") is not True:
+        source = intake.get("deLitAlbedo") or intake.get("sourceImage") or spec.get("sourceImage")
+        # Full-finger gloves are admitted as ordered multi-view evidence and remain
+        # normalized/evidence-only until a verified calibration exists.  Requiring the
+        # single-image weapon camera gate here would incorrectly reject the glove MVP.
+        if intake.get("itemFamily") != "glove" and (not isinstance(camera, dict) or camera.get("solved") is not True):
             warnings.append("quality: reference-projection needs solved referenceCamera")
         if not isinstance(source, str) or not source.strip():
             errors.append("reference-projection requires a de-lit source image")
@@ -697,6 +707,20 @@ def validate_cs2_contract(spec: dict[str, Any], errors: list[str], warnings: lis
             errors.append("exact-texture authored route requires independent albedo, normal, roughness, and metalness maps")
     if route == "procedural-finish" and tier == "exact-texture":
         errors.append("procedural-finish cannot claim exact-texture")
+
+
+def validate_glove_evidence_readiness(spec: dict[str, Any], warnings: list[str]) -> None:
+    """Keep strict-quality fail-closed until the glove's observed form and surface proof exist."""
+    intake = spec.get("cs2Intake")
+    if not isinstance(intake, dict) or intake.get("itemFamily") != "glove":
+        return
+    extensions = spec.get("extensions")
+    glove = extensions.get("glove") if isinstance(extensions, dict) else None
+    if glove is None:
+        glove_intake = spec.get("gloveIntake")
+        glove = glove_intake.get("extension") if isinstance(glove_intake, dict) else None
+    for issue in glove_readiness_errors(glove):
+        warnings.append(f"quality: glove evidence readiness: {issue}")
 
 
 def validate_pipeline_routing_contract(spec: dict[str, Any], errors: list[str]) -> None:
@@ -719,6 +743,11 @@ def validate_pipeline_routing_contract(spec: dict[str, Any], errors: list[str]) 
         errors.append("character-v1.5 routing requires the character template")
     if routing_track == "weapon-v1.4" and not legacy_cs2 and object_class.get("cs2") is not True:
         errors.append("weapon-v1.4 routing requires the CS2 weapon template")
+    if routing_track == "wearable-v1.0":
+        if object_class.get("itemFamily") != "glove" or object_class.get("subtype") != "sport-gloves":
+            errors.append("wearable-v1.0 routing requires the static Sport Gloves target")
+        if not isinstance(spec.get("wearable"), dict) or spec["wearable"].get("template") != "glove-shell-v1":
+            errors.append("wearable-v1.0 routing requires the glove-shell-v1 template")
 
 
 def validate_materials(spec: dict[str, Any], errors: list[str], warnings: list[str]) -> set[str]:
@@ -2506,6 +2535,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[list[str], list[str]]:
     material_ids = validate_materials(spec, errors, warnings)
     validate_material_pipeline_contract(spec, material_ids, errors, warnings)
     validate_cs2_contract(spec, errors, warnings)
+    validate_glove_evidence_readiness(spec, warnings)
     validate_pipeline_routing_contract(spec, errors)
     validate_cs2_view_dependent_environment(spec, errors)
     validate_components(spec, material_ids, evidence_ids, errors, warnings)

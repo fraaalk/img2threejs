@@ -1778,12 +1778,14 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
     function_name = f"create{type_name}Model"
     # Resolved once per generate() so every primitive in one model agrees on density.
     seg = segments_for_spec(spec)
+    cs2_intake = spec.get("cs2Intake") if isinstance(spec.get("cs2Intake"), dict) else {}
+    routing = spec.get("pipelineRouting") if isinstance(spec.get("pipelineRouting"), dict) else {}
     reconstruction_evidence = {
-        "itemFamily": spec.get("itemFamily"),
-        "subtype": spec.get("subtype"),
-        "componentAdapter": spec.get("componentAdapter"),
-        "route": spec.get("route"),
-        "exactnessTier": spec.get("exactnessTier"),
+        "itemFamily": spec.get("itemFamily", cs2_intake.get("itemFamily")),
+        "subtype": spec.get("subtype", cs2_intake.get("subtype")),
+        "componentAdapter": spec.get("componentAdapter", routing.get("adapter")),
+        "route": spec.get("route", cs2_intake.get("route")),
+        "exactnessTier": spec.get("exactnessTier", cs2_intake.get("exactnessTier")),
         "referenceCamera": spec.get("referenceCamera"),
         "approximationNotes": spec.get("approximationNotes", []),
     }
@@ -1810,6 +1812,7 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "  receiveShadow?: boolean;",
         "  textureSize?: number;",
         "  textureAnisotropy?: number;",
+        "  disableMaterialMaps?: boolean;",
         "  qualityPriority?: 'reference-fidelity' | 'balanced';",
         "};",
         "",
@@ -2431,7 +2434,9 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "  if (!map || typeof map !== 'object') return null;",
         "  const record = map as Record<string, unknown>;",
         "  const url = typeof record.url === 'string' && record.url.trim() ? record.url : record.path;",
-        "  return typeof url === 'string' && url.trim() ? url : null;",
+        "  if (typeof url !== 'string' || !url.trim()) return null;",
+        "  // Fixture URIs are contract samples, never browser-loadable texture evidence.",
+        "  return url.startsWith('fixture://') ? null : url;",
         "}",
         "",
         "function createLoadedMapTexture(",
@@ -2594,7 +2599,10 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "}",
         "",
         "function createSculptMaterial(id: string, spec: SculptMaterialSpec, options: ProceduralModelOptions, denseComponent = false): THREE.MeshPhysicalMaterial {",
-        "  const textures = makeReferenceTextureSet(spec, options) ?? makeProceduralTextureSet(id, spec, options);",
+        "  // A map-stripped render is a real material mode used by the blockout gate: it keeps",
+        "  // the same geometry, PBR scalars, lighting, and camera while removing every texture",
+        "  // channel.  This prevents projected pixels from disguising a silhouette defect.",
+        "  const textures = options.disableMaterialMaps ? null : (makeReferenceTextureSet(spec, options) ?? makeProceduralTextureSet(id, spec, options));",
         "  const material = new THREE.MeshPhysicalMaterial({",
         "    color: textures ? 0xffffff : clampedAlbedoColor(spec),",
         "    roughness: textures ? 1 : clamp01(readLayerNumber(spec.roughness, ['base'], 0.76)),",
@@ -3006,7 +3014,17 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
     lines.extend(
         [
             "",
+            "  const pivots: Record<string, THREE.Object3D> = { ...nodes };",
             "  root.userData.sculptRuntime = { nodes, meshes, sockets, colliders, destructionGroups } satisfies ProceduralModelRuntime;",
+            "  root.userData.pivots = pivots;",
+            "  // A static asset still exposes a bounded idle transform: component pivots remain stable while the root breathes.",
+            "  const idleBaseY = root.position.y;",
+            "  const idleBaseRotationY = root.rotation.y;",
+            "  root.userData.tick = (elapsedSeconds: number) => {",
+            "    const phase = Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0;",
+            "    root.position.y = idleBaseY + Math.sin(phase * 1.15) * 0.006;",
+            "    root.rotation.y = idleBaseRotationY + Math.sin(phase * 0.58) * 0.018;",
+            "  };",
             f"  root.userData.lookDevTargets = {json_literal(look_dev_targets)};",
             "  root.userData.actionReadiness = {",
             "    note: 'Use root.userData.sculptRuntime.nodes for transforms, sockets for attachments, colliders for physics proxies, and destructionGroups for breakable sets.',",

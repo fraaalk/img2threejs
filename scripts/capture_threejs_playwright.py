@@ -139,6 +139,12 @@ def capture(manifest_path_value: Path, capture_ids: list[str], headed: bool, tim
                 )
                 if not canvas or canvas["width"] <= 0 or canvas["height"] <= 0:
                     raise RuntimeError("Three.js canvas has zero dimensions")
+                non_background_pixels = page.evaluate(
+                    "() => window.__IMG2THREEJS_CAPTURE__?.countNonBackgroundPixels?.() ?? null"
+                )
+                render_environment = page.evaluate(
+                    "() => window.__IMG2THREEJS_CAPTURE__?.renderEnvironment?.() ?? null"
+                )
                 if mode == "reference":
                     reference_spec = capture_spec.get("reference")
                     if not isinstance(reference_spec, dict) or not reference_spec.get("path"):
@@ -184,7 +190,7 @@ def capture(manifest_path_value: Path, capture_ids: list[str], headed: bool, tim
                         screenshot,
                         ready_signal=ready_value,
                         console_errors=console_errors + page_errors,
-                        browser_snapshot={"canvas": canvas},
+                        browser_snapshot={"canvas": canvas, "nonBackgroundPixels": non_background_pixels, "userAgent": page.evaluate("() => navigator.userAgent"), "renderEnvironment": render_environment},
                     )
 
                 if fidelity_v2:

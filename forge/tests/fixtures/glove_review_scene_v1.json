@@ -1,0 +1,19 @@
+{
+  "version": "glove-review-scene-v1",
+  "thresholdStatus": "uncalibrated",
+  "fixtureId": "sport-gloves-golden-v1",
+  "requiredViewRoles": ["dorsal", "palmar", "thumb-side-profile", "three-quarter"],
+  "cameras": [
+    {"id": "dorsal", "role": "dorsal", "azimuth": 0, "elevation": 8, "viewport": [1024, 1024]},
+    {"id": "palmar", "role": "palmar", "azimuth": 180, "elevation": 8, "viewport": [1024, 1024]},
+    {"id": "thumb-side-profile", "role": "thumb-side-profile", "azimuth": 90, "elevation": 8, "viewport": [1024, 1024]},
+    {"id": "three-quarter", "role": "three-quarter", "azimuth": 35, "elevation": 8, "viewport": [1024, 1024]},
+    {"id": "orbit-a", "role": "orbit-a", "azimuth": 120, "elevation": 12, "viewport": [1024, 1024]},
+    {"id": "orbit-b", "role": "orbit-b", "azimuth": -120, "elevation": 12, "viewport": [1024, 1024]}
+  ],
+  "environment": {"hash": "glove-qa-neutral-v1", "toneMapping": "ACESFilmic", "exposure": 0},
+  "rendererVersion": "three-runtime-contract-v1",
+  "resolution": {"width": 1024, "height": 1024},
+  "background": "neutral-white",
+  "thresholds": {}
+}

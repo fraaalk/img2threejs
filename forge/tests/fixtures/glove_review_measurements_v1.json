@@ -1,0 +1,31 @@
+{
+  "version": "glove-review-measurements.v1",
+  "source": "synthetic-license-safe-golden-and-seeded-negative-fixtures",
+  "golden": {
+    "evidenceCoverage": 1.0,
+    "graphCompleteness": 1.0,
+    "seamBoundaryCorrespondence": 1.0,
+    "attachmentContinuity": 1.0,
+    "finiteGeometry": 1.0,
+    "selfIntersectionFree": 1.0,
+    "penetrationFree": 1.0,
+    "productionManifold": 1.0,
+    "crossSectionVariation": 0.9,
+    "handednessCorrect": 1.0,
+    "asymmetryPreserved": 1.0,
+    "uvMaterialOwnership": 1.0,
+    "runtimeDeterministic": 1.0
+  },
+  "seededNegative": {
+    "slab": {"crossSectionVariation": 0.2},
+    "floating-part": {"attachmentContinuity": 0.3},
+    "seam-mismatch": {"seamBoundaryCorrespondence": 0.4},
+    "invalid-topology": {"productionManifold": 0.0},
+    "penetration": {"penetrationFree": 0.4},
+    "handedness": {"handednessCorrect": 0.0},
+    "false-symmetry": {"asymmetryPreserved": 0.0},
+    "missing-evidence": {"evidenceCoverage": 0.4}
+  },
+  "margins": {"all": 0.05},
+  "thresholdsFrozen": true
+}

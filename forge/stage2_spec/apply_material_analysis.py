@@ -30,6 +30,23 @@ def _layer(existing: Any, value: Any) -> dict[str, Any]:
     return result
 
 
+def _pbr_map_path(pbr: dict[str, Any], channel: str) -> str | None:
+    entry = pbr.get("maps", {}).get(channel) if isinstance(pbr.get("maps"), dict) else None
+    if not isinstance(entry, dict):
+        return None
+    path = entry.get("path") or entry.get("url")
+    return path if isinstance(path, str) and path.strip() else None
+
+
+def _surface_frequency_bands() -> list[dict[str, Any]]:
+    """Conservative production defaults; maps retain the source-specific detail."""
+    return [
+        {"id": "macro", "frequency": 2.0, "amplitude": 0.12, "description": "panel-scale colour and wear placement"},
+        {"id": "meso", "frequency": 12.0, "amplitude": 0.06, "description": "padding, seams, and raised guards"},
+        {"id": "micro", "frequency": 56.0, "amplitude": 0.02, "description": "source-derived woven, grain, and abrasion response"},
+    ]
+
+
 def apply_material_analysis(
     spec: dict[str, Any],
     analysis: dict[str, Any],
@@ -100,6 +117,20 @@ def apply_material_analysis(
         pbr = region.get("referencePbr")
         if isinstance(pbr, dict):
             material["referencePbr"] = copy.deepcopy(pbr)
+            albedo_map = _pbr_map_path(pbr, "albedo")
+            roughness_map = _pbr_map_path(pbr, "roughness")
+            normal_map = _pbr_map_path(pbr, "normal")
+            ao_map = _pbr_map_path(pbr, "ao")
+            if albedo_map:
+                material["albedo"] = {"map": albedo_map, "source": "reference-pixel-extraction"}
+            if roughness_map:
+                material["roughness"] = _layer(material.get("roughness"), material.get("roughness", {}).get("base", 0.75) if isinstance(material.get("roughness"), dict) else 0.75)
+                material["roughness"]["map"] = roughness_map
+            if normal_map:
+                material["normal"] = {"map": normal_map, "source": "reference-pixel-extraction"}
+            if ao_map:
+                material["ambientOcclusion"] = {"map": ao_map, "source": "reference-pixel-extraction"}
+        material.setdefault("surfaceFrequencyBands", _surface_frequency_bands())
         texture_analysis = region.get("textureAnalysis")
         if isinstance(texture_analysis, dict):
             material["textureAnalysis"] = copy.deepcopy(texture_analysis)

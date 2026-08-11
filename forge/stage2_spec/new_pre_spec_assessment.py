@@ -31,6 +31,7 @@ from forge._shared.spec_search import (  # noqa: E402
     serialize_search_results,
 )
 from forge._shared.pipeline_routing import (  # noqa: E402
+    classification_from_cs2_manifest,
     resolve_pipeline_routing,
 )
 from forge.stage2_spec.new_sculpt_spec import (  # noqa: E402
@@ -124,6 +125,10 @@ class PreSpecPayloadRequired(TypedDict):
     authoringInstruction: str
 class PreSpecPayload(PreSpecPayloadRequired, total=False):
     localSpecSearch: LocalSpecSearchPayload
+    sourceViews: list[dict[str, JsonValue]]
+    multiViewSynthesis: dict[str, JsonValue]
+    gloveExtension: dict[str, JsonValue]
+    intakeOnly: bool
 
 
 def detect_cs2_intent(target_name: str) -> bool:
@@ -171,6 +176,7 @@ def make_payload(
     is_cs2: bool = False,
     manifest: dict | None = None,
     is_character: bool = False,
+    source_images: list[str] | None = None,
 ) -> PreSpecPayload:
     assessment = make_pre_spec_assessment(target_name)
     contract = make_quality_contract()
@@ -202,14 +208,17 @@ def make_payload(
             "and unknowns before generating or implementing ObjectSculptSpec."
         ),
     }
+    if source_images:
+        payload["sourceViews"] = [
+            {"id": f"source-view-{index + 1}", "path": path, "orderedIndex": index}
+            for index, path in enumerate(source_images)
+        ]
     if manifest is not None:
         existing_routing = manifest.get("pipelineRouting")
         if isinstance(existing_routing, dict):
-            routing = resolve_pipeline_routing(
-                classification=existing_routing.get("classification")
-            )
+            routing = resolve_pipeline_routing(classification=existing_routing.get("classification"))
         else:
-            routing = resolve_pipeline_routing(legacy_cs2=True)
+            routing = resolve_pipeline_routing(classification=classification_from_cs2_manifest(manifest))
     elif is_character and is_cs2:
         routing = resolve_pipeline_routing(
             explicit_track="character-v1.5",
@@ -247,13 +256,57 @@ def make_payload(
         payload["preSpecAssessment"]["objectClass"]["subtype"] = manifest.get("subtype")
         payload["preSpecAssessment"]["objectClass"]["route"] = manifest.get("route")
         payload["preSpecAssessment"]["objectClass"]["exactnessTier"] = manifest.get("exactnessTier")
+        if isinstance(manifest.get("sourceViews"), list):
+            payload["sourceViews"] = manifest["sourceViews"]
+        extension = manifest.get("extensions", {}).get("glove") if isinstance(manifest.get("extensions"), dict) else None
+        if isinstance(extension, dict):
+            payload["gloveExtension"] = extension
+        if manifest.get("state") == "request-input":
+            payload["intakeOnly"] = True
+            payload["authoringInstruction"] = (
+                "Persist intake coverage and evidence only. Do not emit ObjectSculptSpec, geometry, runtime, or readiness "
+                "until the required glove view set is admitted."
+            )
+    source_records = payload.get("sourceViews", [])
+    if isinstance(source_records, list) and len(source_records) > 1:
+        payload["multiViewSynthesis"] = {
+            "version": "multi-view-synthesis.v1",
+            "mode": "evidence-only",
+            "sourceViewCount": len(source_records),
+            "orderedViews": [
+                {
+                    "id": item.get("id", f"source-view-{index + 1}"),
+                    "role": item.get("role", "unspecified"),
+                    "path": item.get("path", ""),
+                }
+                for index, item in enumerate(source_records)
+                if isinstance(item, dict)
+            ],
+            "calibration": {
+                "status": "not-supplied",
+                "cameraMatrix": None,
+                "focalLengthPx": None,
+                "baselineUnits": None,
+            },
+            "allowedDecisions": [
+                "coverage",
+                "named-view semantic observations",
+                "component visibility and contradictions",
+                "review planning",
+            ],
+            "prohibitedClaims": [
+                "metric dimensions",
+                "calibrated camera pose",
+                "hidden curvature without source evidence",
+            ],
+        }
     return payload
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target_name", help="Human-readable object name")
-    parser.add_argument("--image", help="Reference image path or URL")
+    parser.add_argument("--image", action="append", dest="images", default=[], help="Reference image path or URL; repeat for ordered N-view evidence")
     parser.add_argument(
         "--complexity",
         choices=sorted(COMPLEXITY_MINIMUMS),
@@ -295,16 +348,17 @@ def main(argv: list[str]) -> int:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             parser.error("CS2 intake manifest must be a JSON object")
-        if manifest.get("state") not in {"proceed", "fallback"}:
+        if manifest.get("state") not in {"proceed", "fallback", "request-input"}:
             parser.error(f"CS2 intake is not ready for assessment: {manifest.get('state', 'unknown')}")
         is_cs2 = True
     payload_object = make_payload(
         args.target_name,
-        args.image,
+        args.images[0] if args.images else None,
         complexity,
         is_cs2,
         manifest,
         args.character,
+        args.images,
     )
     collection = select_spec_collection(args.target_name, args.collection)
     try:

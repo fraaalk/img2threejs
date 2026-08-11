@@ -1,0 +1,13 @@
+{
+  "version": "glove-target-v1",
+  "family": "glove",
+  "subtype": "sport-gloves",
+  "output": "static-pair",
+  "canonicalHand": "left",
+  "derivedHand": "right",
+  "scale": "normalized",
+  "mainShellTopology": "production-manifold",
+  "authoritativeRoute": "panel-seam-surface",
+  "reviewRuntime": "runtime/glove-review",
+  "unsupported": ["hand-wraps", "fingerless", "rigging", "cloth-simulation", "gameplay-runtime"]
+}

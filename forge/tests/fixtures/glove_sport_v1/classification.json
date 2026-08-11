@@ -1,0 +1,9 @@
+{
+  "itemFamily": "glove",
+  "subtype": "sport-gloves",
+  "confidence": 0.99,
+  "evidenceRefs": ["fixture:glove-sport-v1"],
+  "provider": "offline-fixture",
+  "version": "1",
+  "timedOut": false
+}

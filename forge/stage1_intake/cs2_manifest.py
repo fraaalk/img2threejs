@@ -9,17 +9,27 @@ import tempfile
 from pathlib import Path
 from typing import Any, Final
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from forge.stage1_intake.check_reference_admission import check_admission
 from forge.stage1_intake.cs2_foundation import enrich_manifest_with_metadata, normalize_cs2_metadata, resolve_identity
 from forge.stage1_intake.cs2_review_contract import build_review_scene
 from forge.stage1_intake.detect_cs2 import detect_cs2_signals
 from forge.stage1_intake.probe_image import probe
 from forge.stage2_spec.cs2_adapters import get_family_adapter
+from forge.stage1_intake.glove_contracts import (
+    REQUIRED_GLOVE_VIEW_ROLES,
+    VALID_GLOVE_SUBTYPES,
+    build_glove_extension,
+    glove_manifest_errors,
+    glove_source_view_id,
+)
 
 SCHEMA_VERSION: Final[int] = 1
-SUPPORTED_FAMILIES: Final[frozenset[str]] = frozenset({"knife", "pistol", "rifle"})
+SUPPORTED_FAMILIES: Final[frozenset[str]] = frozenset({"knife", "pistol", "rifle", "glove"})
 UNSUPPORTED_FAMILIES: Final[frozenset[str]] = frozenset(
-    {"smg", "sniper", "heavy", "glove"}
+    {"pistol", "rifle", "smg", "sniper", "heavy"}
 )
 # Knife subtypes that have a dedicated geometry adapter. A subtype absent here is
 # `unsupported-subtype`, never silently routed through another subtype's tree.
@@ -38,6 +48,8 @@ TIERS: Final[frozenset[str]] = frozenset(
 STATES: Final[frozenset[str]] = frozenset(
     {"proceed", "request-input", "fallback", "rejected", "unsupported-family", "unsupported-subtype"}
 )
+PAIR_LAYOUT_MIN_LARGEST_COMPONENT_FRACTION: Final[float] = 0.45
+PAIR_LAYOUT_MAX_LARGEST_COMPONENT_FRACTION: Final[float] = 0.55
 
 
 def build_classification_record(
@@ -94,6 +106,84 @@ def _heuristic_signal(reference: Path) -> dict[str, Any]:
         return {"is_cs2_candidate": False, "confidence": 0.0, "signals": [], "error": str(exc)}
 
 
+def _paired_glove_plate_override(admission: dict[str, Any]) -> dict[str, Any] | None:
+    """Recognize a two-glove catalogue plate without weakening generic admission.
+
+    The generic gate correctly rejects scattered foreground for a single-object
+    reference.  A catalogue plate showing a left/right glove pair is a bounded
+    exception: its two coherent, similarly sized subjects are expected and the
+    pair is the actual reconstruction target.  Keep the raw rejection intact so
+    later evidence can distinguish this override from an ordinary admission.
+    """
+    if admission.get("admitted"):
+        return None
+    reasons = admission.get("reasons")
+    provenance = admission.get("provenance")
+    if not isinstance(reasons, list) or len(reasons) != 1 or not isinstance(provenance, dict):
+        return None
+    if not str(reasons[0]).startswith("mask coherence:") or provenance.get("duplicateOfHash") is not None:
+        return None
+    fraction = provenance.get("largestComponentFraction")
+    if not isinstance(fraction, (int, float)):
+        return None
+    if not PAIR_LAYOUT_MIN_LARGEST_COMPONENT_FRACTION <= fraction <= PAIR_LAYOUT_MAX_LARGEST_COMPONENT_FRACTION:
+        return None
+    return {
+        "id": "paired-glove-plate-v1",
+        "reason": "two similarly sized disconnected foreground components are the intended left/right glove pair",
+        "rawAdmission": "rejected",
+        "epistemicState": "observed",
+    }
+
+
+def _admit_glove_views(references: list[tuple[Path, str]]) -> list[dict[str, Any]]:
+    """Admit ordered glove views and preserve duplicate relations without dropping inputs."""
+    views: list[dict[str, Any]] = []
+    admitted_hashes: list[int] = []
+    admitted_ids: list[str] = []
+    for index, (path, role) in enumerate(references):
+        resolved = path.expanduser().resolve()
+        technical = probe(resolved) if resolved.exists() else {"width": 0, "height": 0, "warnings": ["file does not exist"]}
+        admission = check_admission(resolved, viewpoint=role, against_hashes=admitted_hashes) if resolved.exists() else {
+            "admitted": False,
+            "reasons": ["reference does not exist"],
+            "provenance": {"pHash": None, "width": 0, "height": 0},
+        }
+        provenance = admission.get("provenance", {})
+        raw_hash = provenance.get("pHash")
+        view_id = glove_source_view_id(role, index)
+        override = _paired_glove_plate_override(admission)
+        admitted = bool(admission.get("admitted")) or override is not None
+        duplicate_of = provenance.get("duplicateOfHash")
+        duplicate_id = None
+        if duplicate_of is not None:
+            duplicate_id = next(
+                (admitted_ids[pos] for pos, admitted_hash in enumerate(admitted_hashes) if admitted_hash == duplicate_of),
+                str(duplicate_of),
+            )
+        view = {
+            "id": view_id,
+            "role": role,
+            "path": str(resolved),
+            "hash": str(raw_hash) if raw_hash is not None else "missing",
+            "width": int(provenance.get("width") or technical.get("width") or 0),
+            "height": int(provenance.get("height") or technical.get("height") or 0),
+            "coverage": provenance.get("foregroundCoverage"),
+            "admission": "admitted" if admitted else "rejected",
+            "admissionReasons": list(admission.get("reasons", [])),
+            "duplicateOf": duplicate_id,
+            "technical": technical,
+        }
+        if override is not None:
+            view["admissionOverride"] = override
+            view["rawAdmission"] = admission
+        views.append(view)
+        if admitted and isinstance(raw_hash, int):
+            admitted_hashes.append(raw_hash)
+            admitted_ids.append(view_id)
+    return views
+
+
 def build_manifest(
     reference: Path,
     classification: dict[str, Any] | None,
@@ -103,6 +193,7 @@ def build_manifest(
     metadata: dict[str, Any] | None = None,
     texture_source: str = "image-only",
     explicit_identity: dict[str, Any] | None = None,
+    references: list[tuple[Path, str]] | None = None,
 ) -> dict[str, Any]:
     resolved = reference.expanduser().resolve()
     technical: dict[str, Any] = probe(resolved) if resolved.exists() else {"path": str(resolved), "warnings": ["file does not exist"]}
@@ -146,9 +237,12 @@ def build_manifest(
         "extensions": {},
         "reviewScene": build_review_scene("not-supplied"),
     }
-    if not admission.get("admitted"):
+    glove_request = isinstance(classification, dict) and classification.get("itemFamily") == "glove"
+    if not admission.get("admitted") and not glove_request:
         manifest["rejectionReasons"] = admission.get("reasons", ["reference failed admission"])
         return manifest
+    if not admission.get("admitted") and glove_request:
+        manifest["warnings"].extend(str(item) for item in admission.get("reasons", []) if str(item) not in manifest["warnings"])
     error = _classification_error(classification)
     if error:
         manifest["warnings"].append(error)
@@ -171,7 +265,36 @@ def build_manifest(
     manifest["identity"] = resolve_identity(explicit_identity, metadata, classification)
     if family not in SUPPORTED_FAMILIES:
         manifest["state"] = "unsupported-family"
-        manifest["unsupportedReason"] = f"no adapter registered for {raw_family}"
+        manifest["unsupportedReason"] = f"no adapter registered for {family}"
+    elif family == "glove" and subtype not in VALID_GLOVE_SUBTYPES:
+        manifest["state"] = "unsupported-subtype"
+        manifest["unsupportedReason"] = f"no glove adapter fixture for {subtype}"
+    elif family == "glove":
+        ordered_references = references or [(reference, "dorsal")]
+        glove_views = _admit_glove_views(ordered_references)
+        manifest["sourceViews"] = glove_views
+        primary = next((view for view in glove_views if view.get("role") == "dorsal"), glove_views[0])
+        manifest["primarySourceViewId"] = primary["id"]
+        manifest["sourceImage"] = primary["path"]
+        manifest["extensions"]["glove"] = build_glove_extension(glove_views, subtype or "sport-gloves")
+        manifest["extensions"]["glove"]["sourceViews"] = glove_views
+        identity_payload = manifest.get("identity", {}).get("identity", {}) if isinstance(manifest.get("identity"), dict) else {}
+        declared_hand = identity_payload.get("hand", identity_payload.get("canonicalHand")) if isinstance(identity_payload, dict) else None
+        hand_conflict = declared_hand in {"left", "right"} and declared_hand != "left"
+        if hand_conflict:
+            manifest["extensions"]["glove"]["contradictions"].append({"field": "canonicalHand", "declared": declared_hand, "required": "left", "epistemicState": "contradiction"})
+            manifest["warnings"].append("conflicting-hand-identity")
+            manifest["state"] = "request-input"
+            manifest["unsupportedReason"] = "hand identity conflicts with canonical-left MVP"
+        role_set = {view.get("role") for view in glove_views if view.get("admission") == "admitted"}
+        complete = set(REQUIRED_GLOVE_VIEW_ROLES).issubset(role_set)
+        required_views = [view for view in glove_views if view.get("role") in set(REQUIRED_GLOVE_VIEW_ROLES)]
+        if not hand_conflict and complete and all(view.get("admission") == "admitted" for view in required_views):
+            manifest["state"] = "proceed"
+            manifest["stagedComponentAdapter"] = "cs2-glove-v1"
+        else:
+            manifest["state"] = "request-input"
+            manifest["unsupportedReason"] = "glove requires all admitted dorsal/palmar/thumb-side-profile/three-quarter views"
     elif not subtype:
         manifest["state"] = "unsupported-subtype"
         manifest["unsupportedReason"] = f"a subtype is required for {family}"
@@ -215,7 +338,12 @@ def validate_manifest(manifest: dict[str, Any]) -> bool:
         return False
     if manifest["state"] == "proceed" and manifest.get("itemFamily") not in SUPPORTED_FAMILIES:
         return False
-    if manifest["state"] == "proceed":
+    if manifest.get("itemFamily") == "glove":
+        if manifest["state"] != "unsupported-subtype" and glove_manifest_errors(
+            manifest, require_complete_views=manifest["state"] == "proceed"
+        ):
+            return False
+    elif manifest["state"] == "proceed":
         adapter_id = manifest.get("componentAdapter")
         if not isinstance(adapter_id, str):
             return False
@@ -256,7 +384,9 @@ def persist_manifest(manifest: dict[str, Any], output: Path) -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("reference", type=Path)
+    parser.add_argument("reference", type=Path, nargs="?")
+    parser.add_argument("--image", action="append", dest="images", default=[], help="ordered reference view; repeat for N-view glove intake")
+    parser.add_argument("--view-role", action="append", dest="view_roles", default=[], help="role for each --image: dorsal, palmar, thumb-side-profile, three-quarter")
     parser.add_argument("--classification", type=Path, help="offline authoritative classification JSON")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--route", choices=sorted(ROUTES), default="reference-projection")
@@ -270,7 +400,21 @@ def main(argv: list[str]) -> int:
             print(json.dumps({"state": existing["state"], "out": str(args.out.resolve()), "resumed": True}, ensure_ascii=False))
             return 0
     classification = json.loads(args.classification.read_text(encoding="utf-8")) if args.classification else None
-    manifest = build_manifest(args.reference, classification, route=args.route, exactness_tier=args.exactness_tier)
+    paths = list(args.images)
+    if args.reference is not None:
+        paths.insert(0, str(args.reference))
+    if not paths:
+        parser.error("provide a positional reference or at least one --image")
+    roles = list(args.view_roles)
+    if roles and len(roles) != len(paths):
+        parser.error("--view-role must be supplied once per reference")
+    if len(paths) > 1 or (classification and classification.get("itemFamily") == "glove"):
+        default_roles = list(REQUIRED_GLOVE_VIEW_ROLES)
+        roles = roles or [default_roles[index] if index < len(default_roles) else "orbit" for index in range(len(paths))]
+        references = [(Path(path), roles[index]) for index, path in enumerate(paths)]
+    else:
+        references = None
+    manifest = build_manifest(Path(paths[0]), classification, route=args.route, exactness_tier=args.exactness_tier, references=references)
     manifest["extensions"]["compatibilityMode"] = args.cs2_pipeline
     persist_manifest(manifest, args.out)
     print(json.dumps({"state": manifest["state"], "out": str(args.out.resolve())}, ensure_ascii=False))

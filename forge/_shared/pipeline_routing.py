@@ -9,9 +9,10 @@ CONFIDENCE_THRESHOLD: Final[float] = 0.82
 TRACK_BY_KIND: Final[dict[str, str]] = {
     "weapon": "weapon-v1.4",
     "character": "character-v1.5",
+    "wearable": "wearable-v1.0",
 }
 VALID_TRACKS: Final[frozenset[str]] = frozenset(TRACK_BY_KIND.values())
-VALID_KINDS: Final[frozenset[str]] = frozenset({"weapon", "character", "hybrid", "unknown"})
+VALID_KINDS: Final[frozenset[str]] = frozenset({"weapon", "character", "wearable", "hybrid", "unknown"})
 VALID_SOURCES: Final[frozenset[str]] = frozenset({"explicit", "classification", "legacy"})
 VALID_STATUSES: Final[frozenset[str]] = frozenset({"resolved", "request-input"})
 
@@ -27,7 +28,7 @@ def _fallback_classification(reason: str) -> dict[str, Any]:
 
 
 def _explicit_classification(track: str) -> dict[str, Any]:
-    kind = "weapon" if track == "weapon-v1.4" else "character"
+    kind = {"weapon-v1.4": "weapon", "character-v1.5": "character", "wearable-v1.0": "wearable"}[track]
     return {
         "kind": kind,
         "confidence": 1.0,
@@ -76,8 +77,9 @@ def classification_from_cs2_manifest(manifest: dict[str, Any]) -> dict[str, Any]
     record = manifest.get("classification")
     if not isinstance(record, dict):
         return _fallback_classification("cs2-manifest-missing-classification")
+    kind = "wearable" if manifest.get("itemFamily") == "glove" else "weapon"
     return {
-        "kind": "weapon",
+        "kind": kind,
         "confidence": record.get("confidence"),
         "evidenceRefs": record.get("evidenceRefs"),
         "provider": record.get("provider"),
@@ -158,7 +160,7 @@ def validate_pipeline_routing(routing: Any) -> list[str]:
     if routing.get("version") != 1:
         errors.append("pipelineRouting.version must be 1")
     if routing.get("track") not in VALID_TRACKS:
-        errors.append("pipelineRouting.track must be weapon-v1.4 or character-v1.5")
+        errors.append("pipelineRouting.track must be weapon-v1.4, character-v1.5, or wearable-v1.0")
     if routing.get("source") not in VALID_SOURCES:
         errors.append("pipelineRouting.source must be explicit, classification, or legacy")
     if routing.get("status") not in VALID_STATUSES:
