@@ -1,10 +1,10 @@
 # CS2 Sport Gloves workflow
 
 This checkout implements a diagnostic v3 review path for one narrow target: static, full-finger
-`sport-gloves`, normalized scale, canonical-left geometry plus a derived right hand. It emits canonical
-triangle meshes with measured non-zero thickness and a portable content-addressed bundle. The current
-normalized fixture remains diagnostic-only: its panel seams are not physically welded, its source controls
-are not evidence-derived, and it cannot return `ready`.
+`sport-gloves`, normalized scale, canonical-left geometry plus a mirrored right hand. Geometry is derived
+from the admitted view's silhouette and inflated over a chamfer medial axis, giving one closed shell per
+hand, so manifoldness is measured rather than promised. It still cannot return `ready`: depth comes from
+an anthropometric prior rather than a side view, which pins `evidenceTier` to `diagnostic`.
 
 **What this track does not claim.** No gate compares the render to the reference, so the review's verdict
 says nothing about whether the model resembles the reference image. `CLAUDE.md`'s screenshot gate binds the
@@ -14,6 +14,13 @@ agent performing a reconstruction, and its tooling is not glove-specific — wha
 ## Reproducible commands
 
 From `img2/`:
+
+The review runtime needs its own dependencies once per checkout, because the browser route copies
+three out of them:
+
+```bash
+npm ci --prefix runtime/glove-review
+```
 
 ```bash
 python3 forge/tests/fixtures/glove_sport_v1/build_fixture.py
@@ -111,9 +118,19 @@ deliberately rejected.
 
 ## Known defects recorded rather than hidden
 
-- The two hands are **coincident**: the right hand is the left with `x` negated, so panels symmetric about
-  `x = 0` occupy the same volume. Six of twelve panels have identical left/right bounds. The surface contract
-  measures this instead of reading the geometry report's `diagnosticOverlapSeparate` declaration, which is
-  hardcoded `true`.
-- Panel boundary loops are hardcoded, with `derivation.confidence: 0.0` and no source view ids. No input image
-  affects any vertex, which is why the track is pinned to `evidenceTier: diagnostic`.
+- **Depth is a prior, not a measurement.** Dorsal and palmar are both front-axis views and constrain the same
+  silhouette, so two CS2 plates carry no depth information at all. Thickness comes from an anthropometric
+  palm ratio, recorded as `derivation.axes.z.state: inferred`, and the tier stays `diagnostic` until a side
+  view supplies it.
+- **The rim's UV sweeps across the atlas seam.** A rim quad joins front vertices (`u < 0.5`) to back vertices
+  (`u > 0.5`), so its texture coordinate interpolates through the middle of the atlas. Visible as fringing at
+  above-capture resolution. Fixing it means splitting rim vertices, which trades against `productionManifold`
+  because edges are counted by vertex index — a decision about which gate measures what it names, not a tweak.
+- **Digits fuse where the reference shows them touching.** A silhouette cannot separate what the photo does
+  not separate.
+- **Front and back inflate symmetrically without a palmar plate.** With one, the back follows the palmar
+  medial axis at a declared 0.4 thickness share; measured 1.50x dorsal-to-palmar on real plates.
+
+Fixed since the panel route, and kept here because the review gates that caught them still guard them: the
+two hands were coincident (six of twelve panels shared bounding boxes) and no input image affected any
+vertex.

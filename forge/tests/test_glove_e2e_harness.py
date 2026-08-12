@@ -21,16 +21,16 @@ from forge.stage4_review.glove_review import METRIC_KINDS, REPORT_VERSION
 from forge.tests.run_glove_e2e import run_golden
 
 
-GLOVE_RUNTIME = ROOT / "runtime" / "glove-review" / "src" / "index.mjs"
+# The runtime is tracked, but its dependencies are not: writeBrowserRuntime copies three out of
+# runtime/glove-review/node_modules, so the real prerequisite is that `npm ci` has been run there.
+# Guarding on the source file alone would let a fresh clone fail with a copy error that reads as a
+# broken harness rather than an unmet setup step.
+GLOVE_RUNTIME_THREE = ROOT / "runtime" / "glove-review" / "node_modules" / "three" / "build"
 
 
 @unittest.skipUnless(
-    GLOVE_RUNTIME.is_file(),
-    # .gitignore excludes runtime/* and re-includes only runtime/scripts/, so runtime/glove-review/
-    # is absent from a fresh clone even though it is source rather than capture output. Without this
-    # guard the harness fails here with a bare file-not-found, which reads as a broken harness
-    # instead of a missing runtime.
-    f"{GLOVE_RUNTIME.relative_to(ROOT)} is absent: runtime/glove-review is not tracked by git",
+    GLOVE_RUNTIME_THREE.is_dir(),
+    "run `npm ci` in runtime/glove-review: the browser route copies three from its node_modules",
 )
 class GloveE2EHarnessTests(unittest.TestCase):
     def test_documented_golden_invocation_runs_and_writes_a_report(self):

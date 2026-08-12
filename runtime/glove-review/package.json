@@ -1,0 +1,12 @@
+{
+  "name": "img2-glove-review-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "three": "0.185.1"
+  },
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.mjs"
+  }
+}

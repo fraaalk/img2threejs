@@ -47,6 +47,13 @@ openspec/
 # directory is excluded, so `runtime/` + `!runtime/scripts/` would silently not work.
 runtime/*
 !runtime/scripts/
+# runtime/glove-review is the wearable review runtime: the browser route that renders the shell and
+# the server that feeds it. It is source, not capture output, and docs/CS2_GLOVE_WORKFLOW.md documents
+# commands that run it -- excluding it meant the glove e2e could not run on a fresh clone at all, and
+# a test asserting the harness works failed there with a bare file-not-found instead.
+!runtime/glove-review/
+runtime/glove-review/node_modules/
+runtime/glove-review/dist/
 
 # Run-time capture output: review renders, focus shots, comparison sheets.
 # These are produced by every capture and gate run, are large, and are never inputs to a build.
