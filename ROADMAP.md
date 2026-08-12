@@ -16,6 +16,7 @@ can plan around.
 | v1.2 | Humanoid character generator | 2026-07-21 | Character/hybrid domain detection, anatomy-aware track, proportion-lock and feature-placement gated passes, per-part character materials |
 | v1.3 | Quality & efficiency (Divine Eye) | 2026-07-22 | Deterministic multi-signal review harness, input-integrity and geometry-truth gates, reference-grounded texture/material analysis, CIEDE2000 colour math |
 | v1.4 | Weapon Pipeline | 2026-07-25–26 | CS2 image-matched reconstruction, provenance-aware intake and local search, projection-first finishes, family-specific adapters, structural review and component-coverage gates |
+| v1.5 | The Character Update | 2026-08-12 | Skeleton derived from the component tree and bound to `SkinnedMesh` geometry, geodesic skinning, hair as a five-stage subsystem with a hard scalp-exposure gate, chirality gates, interior-difference review, `tapered-sweep`, material pipeline with a blocking acceptance gate, resumable workflow state |
 
 ### v1.2 — Humanoid character generator
 
@@ -78,7 +79,7 @@ judgment is spent only where a script cannot decide.
 | v1.2 | Humanoid character generator | Shipped | Character/hybrid domain detection, anatomy and facial landmarks, proportion-lock and feature-placement build passes, per-part character materials |
 | v1.3 | Quality & efficiency (Divine Eye) | Shipped | Deterministic review harness, input-integrity and geometry-truth gates, projection-first texture/material analysis, CIEDE2000 colour math |
 | v1.4 | Weapon Pipeline | Shipped | CS2 image-matched reconstruction, provenance-aware intake, projection-first finishes, family-specific adapters, structural and component-coverage gates |
-| **v1.5** | Character Pipeline | Start supporting characters properly | Character reconstruction · facial features · rigging-ready topology · blendshape preparation · hair & clothing improvements |
+| v1.5 | Character Pipeline | Shipped | Component-derived skeleton bound to `SkinnedMesh` geometry · geodesic skinning · hair subsystem across all five stages · chirality gates · interior-difference review · `tapered-sweep` · material pipeline · resumable workflow state. Not shipped: `hairProfile` compiler, IK, pose-sweep gating, clothing |
 | **v1.6** | Environment Pipeline | Build scenes, not just objects | Buildings · rooms · streets · trees & vegetation · terrain-aware generation · multi-object reconstruction |
 | **v1.7** | Game Pipeline | Game-ready assets | Unity exporter · Unreal exporter · Blender bridge · FBX / OBJ / glTF improvements · LOD generation · collision mesh generation |
 | **v1.8** | Animation Pipeline | Move assets into production | Auto rigging · auto skin weights · Mixamo compatibility · facial rig · lip-sync preparation · animation-ready exports |
@@ -112,15 +113,26 @@ on the strength of a projected texture alone.
 
 ### v1.5 — The Character Update
 
-Characters become a first-class subject rather than a stylized approximation. Facial features get
-dedicated treatment, and the output topology is built to be rigged: clean, predictable loops that
-deform without artifacts, plus blendshape preparation so expression work has somewhere to attach.
-Hair and clothing — the two things that most often break a code-built character — get their own
-material and geometry improvements. Optional local SAM2 masks, MediaPipe face/pose landmarks and
-Depth Anything V2 relative-depth priors feed provenance-backed evidence into intake without changing
-the zero-dependency core or gaining authority over geometry and review gates. The local v1.5 line
-also records resumable, evidence-backed workflow state so character intake and correction loops can
-continue across agents without turning state into a pass bypass.
+*Shipped 2026-08-12.*
+
+Characters became a first-class subject rather than a stylized approximation. A skeleton is derived
+from the component tree — never authored beside it — and bound to real `SkinnedMesh` geometry through
+one shared `Skeleton` and exactly one weight helper, with weights from geodesic distance measured
+through the solid. Hair got its own subsystem across all five stages, gated before its generators
+were written, because the failure it exists to prevent had already shipped four wrong fixes. Left and
+right became an importable constant with two different gates, because a rotated limb pair and a pair
+wrong the same way on both sides are different defects. Review learned to measure inside the
+silhouette, after an outline metric scored a deleted face identically to a finished one. Optional
+local SAM2 masks, MediaPipe face/pose landmarks and Depth Anything V2 relative-depth priors feed
+provenance-backed evidence into intake without changing the zero-dependency core or gaining authority
+over geometry and review gates. Resumable, evidence-backed workflow state lets character intake and
+correction loops continue across agents without turning state into a pass bypass.
+
+**Not shipped in v1.5**, and tracked rather than implied: the `hairProfile` → `componentTree`
+compiler, IK (`BoneSpec.ik` exists and nothing populates it), pose-sweep gating, blendshape-driven
+expression work beyond the morph-target emitter, and clothing. Hair dynamics and strand-level hair
+are out of scope permanently — a single image carries no motion, and this pipeline emits no textures
+or alpha.
 
 ### v1.6 — The Environment Update
 

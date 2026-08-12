@@ -2,7 +2,7 @@
 name: img2threejs
 description: Turn an object or character reference image into a quality-gated, animation-ready procedural Three.js model built in code. Use for image-to-3D reconstruction, detail-accurate object rebuilds, stylized/likeness-maximized human characters, sculpt specs, and staged code generation.
 license: Apache-2.0
-version: 1.4.4
+version: 1.5.0
 ---
 
 # img2threejs — Image to procedural Three.js
@@ -62,19 +62,6 @@ completed step needs evidence; every skipped step needs a reason. The state file
 index, not visual evidence: renders, specs, review history, and deterministic gates remain the
 authoritative artifacts.
 
-## Transparency and Process Debugging (Critical — from Bowie Knife reconstruction)
-
-**The problem:** When the user cannot tell what was done or where something went wrong, they cannot debug the process. Over-claiming (reporting success when features still don't match) destroys trust and makes iterative improvement impossible.
-
-**Rule:** Be transparent + don't over-claim. State exactly what changed each pass, with evidence, and name what still doesn't match:
-- After each pass, explicitly list what changed: "Updated guard shape to extend left edge from -0.56 to -0.48 for handle overlap"
-- Provide evidence: reference the specific values, coordinates, or parameters that changed
-- Name what still doesn't match: "Handle silhouette traced but still flat plane (no Z palm-swell), procedural crosshatch not reference's exact dot-grid knurl"
-- Explain why a change was made: "Extended guard left edge because handle ends at X=-0.42 and guard ended at X=-0.20, causing visual gap"
-- Never claim a feature is "done" when it's only "improved" — use precise language
-- When a gate passes but visual inspection shows issues, explain the limitation: "2D gate passed (fidelity 0.83) but three-quarter render shows blade reads as toy (no grind wedge) — 2D gates are blind to 3D realism"
-
-**The user needs to be able to debug the process, not just the output.** If something is wrong, they should be able to trace which decision led to the error and correct it. Opaque processes force restarts; transparent processes enable refinement.
 ## Transparency and Process Debugging
 
 Report what changed each pass with evidence (exact values/coordinates), name what still doesn't
@@ -335,6 +322,62 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
 10. Sync pipeline state after manual review edits:
      `forge/stage3_build/orchestrate_passes.py sync object-sculpt-spec.json --in-place`.
 
+## Left and right
+
+A left/right pair is a **reflection**, never a rotation. Negate the lateral axis and nothing else:
+`(x, y, z) → (-x, y, z)`. With `forward: +Z`, Y up and a right-handed frame, the character's own
+left is **+X** — the camera that sees the front looks along −Z, its right is +X, and a figure facing
+it has its own left there. This lives in `forge/_shared/chirality.py` as `CHARACTER_LEFT_SIGN`, not
+in a comment, because a comment cannot be imported and two repos already diverged on it.
+
+Two defects shipped in one figure from getting this wrong, and they need **different** gates:
+
+- **Rotation mistaken for reflection.** A limb pair built by negating x *and* z is rotated 180°
+  about Y, and a rotation preserves handedness — so both limbs come out the same hand. Caught at
+  spec time by `validate_chirality`, which names the relation (`rotation` / `translation`) rather
+  than saying "mismatch". Measured: the humanoid's thumb tip sat at z ±0.288 across the pair where a
+  mirror leaves z alone; fixing it moved the hand region **46% closer** to the reference in front.
+- **A pair that is wrong the same way on both sides.** Still a perfect mirror of itself, so the pair
+  test passes. The humanoid's toes were ordered little-to-big across a strip whose index 0 is
+  medial, putting the big toe outboard on *both* feet — and a foot with its big toe outside is the
+  other foot. Only `chirality.medial_lateral_bias` against a reference sees it. Measured toe-band
+  mass: reference 529 medial / 488 lateral, ours 350 / 443.
+
+Reflecting also inverts triangle winding. Flip it back on the mirrored side, or `flatShading`
+derives every normal from the reversed winding and the limb lights as though lit from behind.
+
+## Hair
+
+Hair has its own subsystem, because it has failure modes no other gate can see. Full detail in
+`docs/HAIR_PIPELINE.md`; the operational summary:
+
+- **Roots bind to the scalp as `(u, v)`, never as absolute positions.** An absolute root slides off
+  the skull when a mass is resized, and renders as a bald patch. Hard validation error.
+- **`standProud` is enforced, not advisory.** Declare `{againstComponentId, clearance, maxPush}` on
+  a hair component and the generator emits a per-vertex clearance march against the target's
+  surface.
+- **`scalp_exposure.py` is a HARD gate** and runs on geometry before anything is rendered. A bald
+  patch is always a failure; a coverage shortfall is a soft signal and never on its own authorises
+  widening the masses.
+- **The default representation tier is `shell`, not locks.** The reference GLB's hair is a smooth
+  shell — surface roughness 0.00338 against a torso control of 0.00312 — with all strand detail in
+  textures. Since this skill emits code and no textures, the strand impression comes from faceting
+  and material (`hair.human.code-only`: sheen, anisotropy, root-to-tip gradient), not from lock
+  geometry.
+- **`plane-card` is rejected for hair.** It needs an alpha texture this skill cannot emit.
+- **Hair is rigidly parented, never smooth-skinned.** The geodesic field runs through the skull, so
+  a skinned crown vertex takes measurable neck weight (8.1% on the test fixture) and shears against
+  the skull under rotation.
+- **Lock-tier parameters are uncalibrated** and say so. No multipart GLB with separated hair
+  geometry exists to fit them against.
+
+```bash
+python3 forge/stage1_intake/extract_hair_evidence.py front=ref.front.png rear=ref.rear.png
+python3 forge/stage4_review/scalp_exposure.py --rings skull.json --hair-points hair.json
+python3 forge/stage4_review/hair_gate.py --reference front=ref.png --render front=out.png \
+  --scalp-exposure exposure.json
+```
+
 ## Forge Runtime Contracts
 
 Subdivision runtime tests compile generated TypeScript against the showcase checkout. Set
@@ -446,103 +489,29 @@ hidden blade sides, underside, and back hardware must carry inference confidence
 evidence caused it, what still differs, and choose exactly one next action:
 `continue`, `refine-spec`, `refine-code`, `request-input`, or `stop`.
 
-## Gates (do not skip)
-
-- **Suitability + reference integrity**: pass / conditional / reject before any planning
-  (`grimoire/intake/validation_rubric.md`), AND every reference admitted via
-  `forge/stage1_intake/check_reference_admission.py` (rejects empty/fragmented/tiny/duplicate/
-  undecodable refs with a reason). Intake understanding cross-checked by
-  `forge/stage1_intake/check_intake_correctness.py` (halts on a confident class contradiction).
-- **Divine Eye (the harness heart) — deterministic-first, model-last**: the render evaluator is
-  `forge/stage4_review/divine_eye.py` — a zero-token multi-signal ensemble (IoU/scale HARD gates;
-  proportion/symmetry-parity/pHash/SSIM/edge/blowout/flat/tonal-parity soft) with self-uncertainty
-  (`probe` on signal disagreement) and deterministic routing (`continue`/`refine-spec`/`refine-code`/
-  `probe`). The VLM (`forge/stage4_review/vlm_gate.py`) is a gated, calibrated, cross-checked
-  last layer: **never consulted on a hard-gate failure**, multi-sample-voted, and can rescue a
-  soft near-threshold reject but never grant past a hard geometric failure.
-- **Multi-angle or it didn't happen**: a non-planar form must hold from ≥2 camera angles.
-  `forge/stage4_review/diagnose_render_multi_angle.py` flags `degenerate-view` when an orbited
-  silhouette collapses (a flat plane faking a volume). Orbit angles use reference-free
-  self-consistency — never scored against a reference angle the photo doesn't cover.
-- **CS2 review contract**: `forge/stage4_review/cs2_review.py` consumes the manifest and
-  versioned scene fixture, then blocks wrong family identity, missing projection coverage,
-  painted-region mismatch, critical identity-detail failure, finish/material response failure,
-  and degenerate orbit form. It records exactness tier, hidden-region confidence, per-region
-  confidence, approximation notes, camera, environment hash, exposure, tone mapping, resolution,
-  background, and renderer version.
-- **Bounded correction loop (token-burn safety)**: `forge/stage4_review/correction_loop.py`
-   guarantees termination: hard gates route to `refine-code`; repeated defects and oscillation route
-   to `refine-spec`; plateau and the hard ceiling route to `request-input` — never a silent infinite
-   burn. Deterministic analysis-by-synthesis parameter fitting and Divine Eye provenance are
-   documented in `grimoire/build/analysis_by_synthesis_fitting.md`.
-- **Executable Divine Eye fitting**: `fit_against_divine_eye()` in
-  `forge/stage4_review/fit_params.py` connects deterministic parameter-to-render callbacks to
-  bounded gate-aware Divine Eye optimization. Clean candidates use raw fidelity; hard-gated
-  candidates score below all clean results while retaining original fidelity and provenance. The
-  returned objective and optional selected raw fidelity are explicit, and each copied record has
-  candidate/reference/render provenance. It lazily loads the default evaluator and returns
-  normalized raw-fidelity correction-loop provenance without mutating sources.
-- **Tier 1 (legacy, still valid)**: "Tier 2 (AI-vision) never runs against a render that has not passed Tier 1." Run `forge/stage4_review/diagnose_render.py` (silhouette IoU/proportion/symmetry/per-part color) and record it (`--spec ... --in-place`) before requesting a comparison sheet; `orchestrate_passes.py check` refuses otherwise.
-- **Pre-spec / strict-quality**: blocks code gen until the spec is deep enough for its contract.
-- **Screenshot feedback**: `continue` is allowed only with a render + comparison sheet + global
-  AI-vision score ≥ threshold (default 0.7) AND every critical feature ≥ its own threshold.
-  Details + per-layer scorecard: `grimoire/feedback/render_capture.md`.
-- **Action-ready**: build a runtime hierarchy (pivots, sockets, colliders, destruction groups),
-  never an inert lump; expose `root.userData.sculptRuntime`. `grimoire/readiness/action_rigging.md`.
-- **Procedural rig contract (1.5-alpha)**: for humanoid/character builds, validate the authored
-  `joints`/`parents`/`names`/`matrix_local`/packed skin payload with
-  `forge/stage5_rig/validate_rig_payload.py` before binding `THREE.Skeleton`. The gate proves
-  structural payload integrity only; pose stress, dynamic bounds, readable screenshots, and
-  visual likeness remain separate gates. Payload ownership and non-goals:
-  `grimoire/readiness/procedural_rigging_contract.md`.
-- **Assembly gate (structure, not pixels) — every model ships explodable AND clickable**: this is
-  a build requirement, not a per-project extra. Name every mesh; flag surface relief
-  `userData.explodeWithParent` so it rides its shell; let a named group of *anonymous* meshes be one
-  part while a named group of *named* parts stays a container. Explode and part-picking must share
-  one definition of "a part" — if they disagree, both are wrong. Separate parts by SCALING the
-  layout about the model centre, never by pushing every part the same distance (that translates the
-  arrangement without opening any gap). Then run
-  `forge/stage4_review/check_part_coverage.py --spec <spec> --manifest <parts.json>`: it FAILS on a
-  specified component that was never built and on two components fused onto one mesh; it warns on
-  inventoried details that never reached the spec and on meshes belonging to no named part. This is
-  the only gate that scores STRUCTURE — every other one scores pixels, and a single fused mesh
-  wearing a projected photo passes all of those. Its limit is honest and must be stated when
-  reporting: it proves you built what you specified, never that you specified enough.
-  Full contract + the two rules it took a wrong pass to learn: `grimoire/build/geometry_patterns.md`.
-- **Attachment**: child appendages (branches/limbs/handles/tubes) need `attachment.parentSocket`,
-  `localStart`, `localEnd`, `contactType`, `embedDepth`/`overlap`, `gapTolerance` — no mid-air parts.
-  `grimoire/readiness/joint_attachment.md`.
-- **Material/lighting**: `grimoire/feedback/shading_realism.md` — independent PBR channels
-  (never alias albedo into roughness/normal/AO), macro/meso/micro frequency bands, real lights.
-- **Detail inventory**: for `moderate`+ subjects strict-quality blocks code gen until the
-  `detailInventory` reaches `targetMinDetails` and every detail maps to a real component/material
-  entry (gloss needs low-roughness/clearcoat; fasteners need instancing/micro parts).
-- **Character track**: when `primaryDomain` is `character`/`hybrid` (or `--character`), the spec
-  author auto-builds a stylized humanoid template (head/neck/torso/arms + hair, glasses,
-  headphones, face features), flattened to world space under a hidden root, with per-part
-  character materials and character build passes (`proportion-lock`, `feature-placement`).
-  strict-quality requires a filled `anatomy` block (head-units, proportions, face landmarks) and
-  character feature targets. Suitability routing for humans: `grimoire/intake/validation_rubric.md`
-  (stylized vs maximum-likeness). Stylized bust, not a face-copy; refine positions per reference.
-The initial CS2 family boundary is **knife only**. Pistol, rifle, SMG, sniper, heavy, glove, and
-unknown knife subtypes must stop with `unsupported-family` or `unsupported-subtype`; they must not
-receive the knife component tree as a generic fallback.
-
 For every CS2 reconstruction, MUST read the full layer contract, intake order, and surface/review
 rule in `grimoire/intake/cs2_intake_contract.md` before intake state can advance.
 
 ## Gates (do not skip)
 
 Before any visual review or `continue` decision, MUST read the full gate-by-gate contract in
-`grimoire/review/gates_reference.md` (Divine Eye, VLM rescue, multi-angle, CS2 review, bounded
-correction, screenshot feedback, assembly, attachment, material, detail inventory, character
-track). In short:
+`grimoire/review/gates_reference.md` (Divine Eye, VLM rescue, multi-angle, interior difference,
+chirality, hair, CS2 review, bounded correction, Divine Eye fitting, screenshot feedback, assembly,
+attachment, material, detail inventory, rig payload, character track). In short:
 
 - Validate references first (`grimoire/intake/validation_rubric.md`, `check_reference_admission.py`).
 - `divine_eye.py` is deterministic-first; the VLM (`vlm_gate.py`) is a gated last layer, never
   consulted on a hard-gate failure.
 - A non-planar form must hold from ≥2 angles (`diagnose_render_multi_angle.py`).
-- CS2 knife builds also run `cs2_review.py` against the versioned scene fixture.
+- Measure INSIDE the silhouette every visual pass (`interior_difference.py`). Silhouette IoU reads
+  ~11% of figure cells: a model with its face deleted scored the same 0.8803 as the finished face.
+- Every `-l`/`-r` pair is a MIRROR, not a rotation — hard at spec time (`validate_chirality`). A pair
+  wrong the same way on both sides still passes, and needs `medial_lateral_bias` vs a reference.
+- Hair subjects: `scalp_exposure.py` is HARD and runs on geometry before any render; `hair_gate.py`
+  is soft and subordinate to it. A coverage shortfall never authorises widening the masses.
+- Character builds validate the rig payload (`stage5_rig/validate_rig_payload.py`) before binding a
+  `THREE.Skeleton`; it proves payload integrity only, never pose stress or likeness.
+- CS2 builds also run `cs2_review.py` against the versioned scene fixture.
 - Local state enforces 3 corrections per pass and 6 total by default; reaching either limit is a
   hard stop. `correction_loop.py` may stop earlier on repeated defects, oscillation, or plateau.
 - `continue` requires a render + comparison sheet + AI-vision score ≥ threshold, every critical

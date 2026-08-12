@@ -9,7 +9,7 @@
 Quality-gated, animation-ready, and deliberately token-efficient — reconstruction-by-code, not photogrammetry, mesh extraction, or downloaded art packs.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.4-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-green.svg)](CHANGELOG.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Runtime](https://img.shields.io/badge/runtime-Three.js-000000.svg)](https://threejs.org)
 [![Tooling](https://img.shields.io/badge/tooling-Python%203.10%2B%20stdlib-3776ab.svg)](forge)
@@ -214,8 +214,17 @@ The net effect: you still get a faithful 3D model from an image, but the expensi
 | `stage1_intake/solve_camera_pose.py` | Emit a reference-camera block so the render can be camera-matched. |
 | `stage1_intake/delight_albedo.py` | Approximate a neutral albedo from the photo before texture projection. |
 | `stage3_build/bake_projected_texture.py` | Emit a projection/UV-bake descriptor for photo-texture projection. |
+| `stage5_rig/rig_spec.py` | Derive and validate a skeleton from the component tree, so bones cannot drift from the geometry. |
+| `stage5_rig/geodesic_skinning.py` | Vertex weights from distance measured through the solid; keeps rigid roles out of smooth skinning. |
+| `stage5_rig/validate_rig_payload.py` | Blocking payload-integrity gate before a `THREE.Skeleton` is bound. |
+| `stage1_intake/extract_hair_evidence.py` | Hair/skin split, banded coverage, hairline, highlight band, root-to-tip delta. |
+| `stage4_review/scalp_exposure.py` | HARD gate: finds bald patches on geometry, before any render. |
+| `stage4_review/hair_gate.py` | Soft gate: hair coverage, hairline and highlight offsets against the reference. |
+| `stage4_review/interior_difference.py` | Appearance difference inside the silhouette, banded by height. Required per visual pass. |
+| `_shared/chirality.py` | Left/right as an importable convention, with the two gates the two chirality defects need. |
+| `_shared/pipeline_routing.py` | Fail-closed weapon/character routing; low confidence resolves to `request-input`. |
 
-The `grimoire/` folder holds the detailed rubrics each gate applies (validation, pre-spec assessment, procedural patterns, material and lighting realism, attachment correctness, action-ready models, self-correction).
+This is a curated selection — `forge/` holds around ninety modules. The executable reference with every flag is [`grimoire/scripts.md`](grimoire/scripts.md), and the gate-by-gate contract is [`grimoire/review/gates_reference.md`](grimoire/review/gates_reference.md). The rest of `grimoire/` holds the rubrics each gate applies (validation, pre-spec assessment, procedural patterns, material and lighting realism, attachment correctness, action-ready models, self-correction).
 
 ### Optional reference-fidelity tooling
 
@@ -232,6 +241,7 @@ Install, routing, provenance rules and exact commands:
 
 - An `ObjectSculptSpec` JSON: the full component tree, materials, repetition systems, sockets, and a recorded review history for every pass.
 - A TypeScript `createObjectNameModel(spec, options)` factory returning a `THREE.Group`, with `root.userData.sculptRuntime` exposing nodes, sockets, colliders, and destruction groups.
+- For character builds, `root.userData.rig`: bones, one shared `Skeleton`, bone order and index map, and a `bound` flag computed from whether every skinned mesh actually bound.
 - A render plus comparison sheets documenting the fidelity at each pass.
 For the script-by-script reference and the full list of output artifacts, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -248,10 +258,9 @@ For the script-by-script reference and the full list of output artifacts, see [d
 - **v1.4 — The Weapon Update** — CS2 image-matched reconstruction: provenance-aware intake, projection-first finishes, family-specific weapon adapters, and structural review gates.
 - **v1.4.1** — CS2 hardening: explicit component coverage, a dedicated Glock-18 assembly contract, map-stripped blockout evidence, and stricter geometry-integrity checks.
 - **creature generator** — 4 body plans (quadruped / avian / winged-dragon / serpentine), `animalAnatomy` spec, spine-loft geometry, ΔE00 colour gates.
+- **v1.5 — The Character Update** — a skeleton derived from the component tree and bound to `SkinnedMesh` geometry, geodesic skinning, hair as a five-stage subsystem with a hard scalp-exposure gate, chirality gates, interior-difference review, the `tapered-sweep` primitive, the material pipeline with a blocking acceptance gate, and resumable workflow state. Not included: the `hairProfile` compiler, IK, pose-sweep gating, clothing.
 
 **Next — one theme per release:**
-
-- **v1.5 — The Character Update** *(in progress)*: character reconstruction, facial features, rigging-ready topology, blendshape preparation, hair and clothing.
 - **v1.6 — The Environment Update**: buildings, rooms, streets, vegetation, terrain-aware and multi-object reconstruction.
 - **v1.7 — The Game Pipeline Update**: Unity and Unreal exporters, a Blender bridge, LOD and collision-mesh generation.
 - **v1.8 — The Animation Update**: auto rigging, auto skin weights, Mixamo compatibility, facial rig.
