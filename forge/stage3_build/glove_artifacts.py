@@ -110,6 +110,10 @@ def write_model_bundle(
         "factoryModule": {"path": factory_path.relative_to(output_dir).as_posix(), "sha256": factory_hash},
         "payloads": payloads,
         "upstream": upstream or {},
+        # The parameters the runtime rebuilds the shell from, and the texture its uv0 addresses.
+        # Both live inside rootDigest so the browser cannot be handed geometry the review did not see.
+        **({"geometryDescriptor": geometry_report["geometryDescriptor"]} if geometry_report.get("geometryDescriptor") else {}),
+        **({"surfaceAtlas": geometry_report["surfaceAtlas"]} if geometry_report.get("surfaceAtlas") else {}),
         "geometrySummary": {"meshCount": len(geometry_report["meshes"]), "seamCount": len(geometry_report.get("seams", [])), "mainShellPolicy": geometry_report.get("mainShellPolicy"), "canonicalMeshDigest": _mesh_digest(geometry_report["meshes"]), "geometryClaimsDigest": canonical_hash(geometry_report)},
         "toolchain": {"generator": "forge.stage3_build.glove_artifacts", "python": "3.10+", "deterministic": True},
     }

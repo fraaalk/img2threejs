@@ -123,6 +123,51 @@ class GloveShellRuntimeParityTests(unittest.TestCase):
         worst_uv = max(abs(a - b) for a, b in zip(runtime["uvs"], expected_uv))
         self.assertLess(worst_uv, 1e-3, f"runtime and python uvs diverge by {worst_uv}")
 
+    def _review_runtime_parity(self, geometry, hand: str) -> None:
+        """The review runtime carries its own copy of the inflation, so it needs its own pin.
+
+        It returns plain arrays and imports nothing, so unlike the emitted TypeScript this needs no
+        showcase checkout — there is no reason for it to be the one implementation left unchecked.
+        """
+        body = dict(geometry["geometryDescriptor"][DESCRIPTOR_KIND])
+        body["hand"] = hand
+        module = (ROOT / "runtime" / "glove-review" / "src" / "shell.mjs").as_posix()
+        harness = "\n".join([
+            f"import {{ buildShellAttributes }} from {json.dumps(module)};",
+            f"const built = buildShellAttributes({json.dumps(body)});",
+            "process.stdout.write(JSON.stringify({",
+            "  positions: built.positions.map((value) => Math.round(value * 1e4) / 1e4),",
+            "  uvs: built.uvs.map((value) => Math.round(value * 1e4) / 1e4),",
+            "  indexCount: built.indices.length,",
+            "}));",
+        ])
+        with tempfile.TemporaryDirectory(prefix="img2-shell-review-parity-") as raw:
+            script = Path(raw) / "parity.mjs"
+            script.write_text(harness, encoding="utf-8")
+            completed = subprocess.run(["node", str(script)], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+        runtime = json.loads(completed.stdout)
+        mesh = next(item for item in geometry["meshes"] if item["hand"] == hand)
+        self.assertEqual(runtime["indexCount"], len(mesh["indices"]) * 3)
+        expected = [round(value, 4) for vertex in mesh["vertices"] for value in vertex]
+        self.assertEqual(len(runtime["positions"]), len(expected))
+        self.assertLess(max(abs(a - b) for a, b in zip(runtime["positions"], expected)), 1e-3)
+        expected_uv = [round(value, 4) for pair in mesh["uv0"] for value in pair]
+        self.assertEqual(len(runtime["uvs"]), len(expected_uv))
+        self.assertLess(max(abs(a - b) for a, b in zip(runtime["uvs"], expected_uv)), 1e-3)
+
+    def test_review_runtime_matches_python_for_both_hands(self):
+        for hand in ("left", "right"):
+            with self.subTest(hand=hand):
+                self._review_runtime_parity(self.geometry, hand)
+
+    def test_review_runtime_matches_python_with_a_palmar_back_surface(self):
+        asymmetric = build_glove_shell_geometry(
+            FIXTURE, source_view_id="glove-view-1-dorsal", grid=GRID,
+            palmar_reference=PALMAR_FIXTURE, palmar_source_view_id="glove-view-2-palmar",
+        )
+        self._review_runtime_parity(asymmetric, "right")
+
     def test_runtime_matches_python_for_both_hands(self):
         for hand in ("left", "right"):
             with self.subTest(hand=hand):

@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from forge.stage1_intake.glove_contracts import GLOVE_ASSEMBLY_VERSION, SURFACE_BEARING_EVIDENCE_USE, glove_manifest_errors
+from forge._shared.glove_silhouette import resolve_target_views
+from forge.stage1_intake.glove_contracts import GLOVE_ASSEMBLY_VERSION, glove_manifest_errors
 from forge.stage2_spec.glove_assembly import build_glove_assembly, canonical_hash, validate_glove_assembly, write_json_atomic
 from forge.stage3_build.glove_artifacts import build_bundle_from_geometry
 from forge.stage3_build.glove_shell import build_glove_shell_geometry
@@ -14,39 +15,6 @@ from forge.stage3_build.glove_shell import build_glove_shell_geometry
 
 def _digest(payload: Any) -> str:
     return canonical_hash(payload)
-
-
-def resolve_palmar_reference(manifest: dict[str, Any]) -> tuple[Path | None, str | None]:
-    """The palmar plate shapes the back surface. Absent one, the shell stays symmetric and says so."""
-    for view in manifest.get("sourceViews", []):
-        if not isinstance(view, dict) or view.get("role") != "palmar" or view.get("admission") != "admitted":
-            continue
-        if view.get("evidenceUse") not in {None, SURFACE_BEARING_EVIDENCE_USE}:
-            continue
-        path = Path(str(view.get("path")))
-        if path.is_file():
-            return path, str(view.get("id"))
-    return None, None
-
-
-def resolve_shell_reference(manifest: dict[str, Any]) -> tuple[Path, str]:
-    """Pick the admitted view the shell outline is measured from.
-
-    It must be a target view: geometry may be borrowed from a technical plate, but the primary
-    outline is the item's own, and preferring the primary keeps the choice deterministic.
-    """
-    views = [view for view in manifest.get("sourceViews", []) if isinstance(view, dict)]
-    primary = manifest.get("primarySourceViewId")
-    ordered = sorted(views, key=lambda view: (view.get("id") != primary, str(view.get("id"))))
-    for view in ordered:
-        if view.get("admission") != "admitted":
-            continue
-        if view.get("evidenceUse") not in {None, SURFACE_BEARING_EVIDENCE_USE}:
-            continue
-        path = Path(str(view.get("path")))
-        if path.is_file():
-            return path, str(view.get("id"))
-    raise ValueError("no admitted target view with a readable image to measure the shell outline from")
 
 
 def validate_glove_build_inputs(manifest: dict[str, Any], assessment: dict[str, Any], spec: dict[str, Any], assembly: dict[str, Any]) -> list[str]:
@@ -112,11 +80,14 @@ def build_glove_model_from_artifacts(
         }
     # The assembly is now the semantic panel/material inventory that surface regions map onto; the
     # geometry itself is measured from the reference rather than read from its hardcoded loops.
-    reference, source_view_id = resolve_shell_reference(manifest)
-    palmar_reference, palmar_source_view_id = resolve_palmar_reference(manifest)
+    outline, palmar = resolve_target_views(manifest)
+    if outline is None:
+        raise ValueError("no admitted target view with a readable image to measure the shell outline from")
     geometry = build_glove_shell_geometry(
-        reference, source_view_id=source_view_id,
-        palmar_reference=palmar_reference, palmar_source_view_id=palmar_source_view_id,
+        outline[0], source_view_id=outline[1],
+        palmar_reference=palmar[0] if palmar else None,
+        palmar_source_view_id=palmar[1] if palmar else None,
+        atlas_output=output_dir / "surface-atlas.png",
     )
     bundle, report = build_bundle_from_geometry(geometry, output_dir, upstream=upstream)
     descriptor = json.loads(bundle.read_text(encoding="utf-8"))
