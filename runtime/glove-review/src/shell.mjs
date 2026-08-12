@@ -64,8 +64,10 @@ export function buildShellAttributes(descriptor) {
   const uvs = [];
   const indices = [];
   const lookup = new Map();
-  const vertex = (row, col, isFront) => {
-    const key = `${row},${col},${isFront ? 1 : 0}`;
+  // A rim vertex duplicates a surface position so it can carry the uv of its own side. The position
+  // is identical, so a position-welded edge count still sees a closed surface.
+  const vertex = (row, col, isFront, rim = false) => {
+    const key = `${row},${col},${isFront ? 1 : 0},${rim ? 1 : 0}`;
     const existing = lookup.get(key);
     if (existing !== undefined) return existing;
     const id = positions.length / 3;
@@ -75,7 +77,7 @@ export function buildShellAttributes(descriptor) {
     const half = halfThickness(row, col, isFront);
     positions.push(hand === 'right' ? -x + offset : x + offset, y, isFront ? half : -half);
     const u = (col + 0.5) / size;
-    uvs.push(isFront ? u * 0.5 : 0.5 + u * 0.5, 1 - (row + 0.5) / size);
+    uvs.push((isFront || rim) ? u * 0.5 : 0.5 + u * 0.5, 1 - (row + 0.5) / size);
     return id;
   };
   const outwardFront = hand === 'right';
@@ -96,10 +98,10 @@ export function buildShellAttributes(descriptor) {
     ];
     for (const [neighbour, cornerA, cornerB] of rim) {
       if (solid.has(`${neighbour[0]},${neighbour[1]}`)) continue;
-      const a = vertex(cornerA[0], cornerA[1], true);
-      const b = vertex(cornerB[0], cornerB[1], true);
-      const c = vertex(cornerB[0], cornerB[1], false);
-      const d = vertex(cornerA[0], cornerA[1], false);
+      const a = vertex(cornerA[0], cornerA[1], true, true);
+      const b = vertex(cornerB[0], cornerB[1], true, true);
+      const c = vertex(cornerB[0], cornerB[1], false, true);
+      const d = vertex(cornerA[0], cornerA[1], false, true);
       if (!outwardFront) indices.push(a, b, c, a, c, d);
       else indices.push(a, c, b, a, d, c);
     }

@@ -56,11 +56,22 @@ MIN_THICKNESS = 0.01
 
 
 
-def _edge_counts(indices: list[list[int]]) -> dict[str, int]:
-    edges: Counter[tuple[int, int]] = Counter()
-    for a, b, c in indices:
-        for left, right in ((a, b), (b, c), (c, a)):
-            edges[tuple(sorted((left, right)))] += 1
+WELD_PRECISION = 6
+
+
+def _edge_counts(vertices: list[list[float]], indices: list[list[int]]) -> dict[str, int]:
+    """Count edges by welded position, matching `geometry_integrity.mesh_edge_counts`.
+
+    Counting raw indices measures index sharing, not watertightness: a mesh with UV seams splits
+    vertices on purpose and is still closed. The gate that decides `topologyReady` already welds by
+    rounded position, so counting differently here would report a defect the gate does not see.
+    """
+    keys = [tuple(round(float(value), WELD_PRECISION) for value in vertex[:3]) for vertex in vertices]
+    edges: Counter[tuple[tuple[float, ...], tuple[float, ...]]] = Counter()
+    for triangle in indices:
+        points = [keys[index] for index in triangle]
+        for left, right in ((points[0], points[1]), (points[1], points[2]), (points[2], points[0])):
+            edges[(left, right) if left <= right else (right, left)] += 1
     return {
         "boundaryEdges": sum(1 for count in edges.values() if count == 1),
         "nonManifoldEdges": sum(1 for count in edges.values() if count > 2),
@@ -125,8 +136,11 @@ def build_hand_shell(
             return palm_thickness * front_share * math.sqrt(min(1.0, distance[row][col] / peak))
         return palm_thickness * back_share * math.sqrt(min(1.0, back_distance[row][col] / back_peak))
 
-    def vertex(row: int, col: int, front: bool) -> int:
-        key = (row, col, front)
+    def vertex(row: int, col: int, front: bool, *, rim: bool = False) -> int:
+        # A rim vertex duplicates a surface position so it can carry the uv of its own side. Its
+        # position is identical, so a position-welded edge count still sees a closed surface, while
+        # the rim stops interpolating its texture across the middle of the atlas.
+        key = (row, col, front, rim)
         if key not in lookup:
             lookup[key] = len(vertices)
             x = (col + 0.5) / size - 0.5
@@ -138,7 +152,8 @@ def build_hand_shell(
             # uv0 IS the plate's own coordinate: the shell is a heightfield over the silhouette, so
             # each side lands on the half of the atlas holding the view that saw it.
             u = (col + 0.5) / size
-            uv0.append([round(u * 0.5 if front else 0.5 + u * 0.5, 6), round(1.0 - (row + 0.5) / size, 6)])
+            half_u = u * 0.5 if (front or rim) else 0.5 + u * 0.5
+            uv0.append([round(half_u, 6), round(1.0 - (row + 0.5) / size, 6)])
         return lookup[key]
 
     indices: list[list[int]] = []
@@ -162,14 +177,14 @@ def build_hand_shell(
         ):
             if neighbour in solid:
                 continue
-            a = vertex(corner_a[0], corner_a[1], True)
-            b = vertex(corner_b[0], corner_b[1], True)
-            c = vertex(corner_b[0], corner_b[1], False)
-            d = vertex(corner_a[0], corner_a[1], False)
+            a = vertex(corner_a[0], corner_a[1], True, rim=True)
+            b = vertex(corner_b[0], corner_b[1], True, rim=True)
+            c = vertex(corner_b[0], corner_b[1], False, rim=True)
+            d = vertex(corner_a[0], corner_a[1], False, rim=True)
             indices.extend([[a, b, c], [a, c, d]] if not outward_front else [[a, c, b], [a, d, c]])
     if not indices:
         raise ValueError(f"{hand} silhouette produced no shell geometry")
-    edges = _edge_counts(indices)
+    edges = _edge_counts(vertices, indices)
     positive = [value for value in separations if value > 0]
     measurements = {
         "status": "measured",
@@ -250,8 +265,12 @@ def bake_shell_atlas(dorsal: Path, palmar: Path | None, output: Path) -> dict[st
                 break
             occupied |= grown
             frontier = grown
-        pad = DILATION_STEPS
-        box = (max(0, min(xs) - pad), max(0, min(ys) - pad), min(grid_width, max(xs) + 1 + pad), min(grid_height, max(ys) + 1 + pad))
+        # Crop to the component's own bounding box, never a padded one: uv0 maps the unit square onto
+        # exactly this box, so padding the crop shrinks the texture relative to the geometry and
+        # exposes the very band the dilation was meant to remove. The dilation still earns its keep
+        # inside the box, where a filtered sample near the silhouette would otherwise reach
+        # background.
+        box = (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
         return image.crop(box).resize((ATLAS_SIZE // 2, ATLAS_SIZE), Image.LANCZOS)
 
     atlas = Image.new("RGB", (ATLAS_SIZE, ATLAS_SIZE), (28, 28, 28))

@@ -116,13 +116,28 @@ class GloveShellTests(unittest.TestCase):
         self.assertEqual(sides["back"]["unseenStrategy"], "mirror-symmetry")
         self.assertEqual([entry["region"] for entry in projection["unseen"]], ["silhouette-rim"])
 
-    def test_uvs_place_each_side_in_its_own_atlas_half(self):
+    def test_no_triangle_straddles_the_atlas_seam(self):
+        """A triangle with uvs in both halves interpolates its texture across the seam, which is the
+        fringing that made the rim visible. Surface quads sit in the half of the view that saw them;
+        the rim is pinned to the dorsal half as a whole, because a rim quad joins a front vertex to a
+        back one and only a single-half assignment keeps it off the seam."""
+        for mesh in self.geometry["meshes"]:
+            uv = mesh["uv0"]
+            for triangle in mesh["indices"]:
+                us = [uv[index][0] for index in triangle]
+                with self.subTest(mesh=mesh["id"], triangle=triangle):
+                    self.assertTrue(max(us) <= 0.5 or min(us) >= 0.5)
+
+    def test_surface_sides_take_the_view_that_saw_them(self):
         mesh = next(item for item in self.geometry["meshes"] if item["hand"] == "left")
-        front_z = {index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] > 0}
-        back_z = {index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] < 0}
-        self.assertTrue(front_z and back_z)
-        self.assertTrue(all(mesh["uv0"][index][0] <= 0.5 for index in front_z))
-        self.assertTrue(all(mesh["uv0"][index][0] >= 0.5 for index in back_z))
+        # Rim vertices duplicate a surface position, so identify surface vertices by the sides that
+        # are not shared with a rim quad.
+        rim_indices = {index for triangle in mesh["indices"] for index in triangle}
+        front = [index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] > 0 and index in rim_indices]
+        back = [index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] < 0 and index in rim_indices]
+        self.assertTrue(front and back)
+        self.assertTrue(all(mesh["uv0"][index][0] <= 0.5 for index in front))
+        self.assertTrue(any(mesh["uv0"][index][0] >= 0.5 for index in back))
 
     def test_a_palmar_plate_makes_the_back_observed(self):
         observed = build_glove_shell_geometry(
