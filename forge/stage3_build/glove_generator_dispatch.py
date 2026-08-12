@@ -6,13 +6,34 @@ import json
 from pathlib import Path
 from typing import Any
 
-from forge.stage1_intake.glove_contracts import GLOVE_ASSEMBLY_VERSION, glove_manifest_errors
+from forge.stage1_intake.glove_contracts import GLOVE_ASSEMBLY_VERSION, SURFACE_BEARING_EVIDENCE_USE, glove_manifest_errors
 from forge.stage2_spec.glove_assembly import build_glove_assembly, canonical_hash, validate_glove_assembly, write_json_atomic
-from forge.stage3_build.glove_artifacts import build_bundle_from_assembly
+from forge.stage3_build.glove_artifacts import build_bundle_from_geometry
+from forge.stage3_build.glove_shell import build_glove_shell_geometry
 
 
 def _digest(payload: Any) -> str:
     return canonical_hash(payload)
+
+
+def resolve_shell_reference(manifest: dict[str, Any]) -> tuple[Path, str]:
+    """Pick the admitted view the shell outline is measured from.
+
+    It must be a target view: geometry may be borrowed from a technical plate, but the primary
+    outline is the item's own, and preferring the primary keeps the choice deterministic.
+    """
+    views = [view for view in manifest.get("sourceViews", []) if isinstance(view, dict)]
+    primary = manifest.get("primarySourceViewId")
+    ordered = sorted(views, key=lambda view: (view.get("id") != primary, str(view.get("id"))))
+    for view in ordered:
+        if view.get("admission") != "admitted":
+            continue
+        if view.get("evidenceUse") not in {None, SURFACE_BEARING_EVIDENCE_USE}:
+            continue
+        path = Path(str(view.get("path")))
+        if path.is_file():
+            return path, str(view.get("id"))
+    raise ValueError("no admitted target view with a readable image to measure the shell outline from")
 
 
 def validate_glove_build_inputs(manifest: dict[str, Any], assessment: dict[str, Any], spec: dict[str, Any], assembly: dict[str, Any]) -> list[str]:
@@ -76,7 +97,11 @@ def build_glove_model_from_artifacts(
             "path": path.relative_to(output_dir).as_posix(),
             "sha256": _digest(payload),
         }
-    bundle, report = build_bundle_from_assembly(assembly, output_dir, upstream=upstream)
+    # The assembly is now the semantic panel/material inventory that surface regions map onto; the
+    # geometry itself is measured from the reference rather than read from its hardcoded loops.
+    reference, source_view_id = resolve_shell_reference(manifest)
+    geometry = build_glove_shell_geometry(reference, source_view_id=source_view_id)
+    bundle, report = build_bundle_from_geometry(geometry, output_dir, upstream=upstream)
     descriptor = json.loads(bundle.read_text(encoding="utf-8"))
     if descriptor.get("upstream") != upstream:
         raise ValueError("glove model bundle dropped upstream identity")

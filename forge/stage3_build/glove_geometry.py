@@ -219,7 +219,10 @@ def build_glove_geometry(assembly: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_geometry_report(report: Any, *, require_production: bool = True) -> list[str]:
+def validate_geometry_report(report: Any, *, require_production: bool = True, require_evidence_tier: bool = True) -> list[str]:
+    """Validate the report. `require_evidence_tier` is separable on purpose: topology readiness and
+    evidence tier are different claims, and a caller measuring topology must not inherit a verdict
+    about where the numbers came from."""
     if not isinstance(report, dict):
         return ["geometry report must be an object"]
     errors: list[str] = []
@@ -254,7 +257,7 @@ def validate_geometry_report(report: Any, *, require_production: bool = True) ->
         elif measurement.get("minimumThickness", 0.0) < MIN_THICKNESS or measurement.get("zeroAreaTriangleCount", 1):
             errors.append(f"mesh {mesh.get('id')} has degenerate extrusion")
     if require_production:
-        if report.get("evidenceTier") != "evidence-backed":
+        if require_evidence_tier and report.get("evidenceTier") != "evidence-backed":
             errors.append("diagnostic geometry cannot satisfy production validation")
         for seam in report.get("seams", []):
             if seam.get("status") != "measured" or seam.get("residual") is None or seam.get("residual") > SEAM_RESIDUAL_TOLERANCE or not seam.get("welded"):

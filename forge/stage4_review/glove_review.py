@@ -365,6 +365,10 @@ def evaluate_glove_review(manifest: dict[str, Any], artifacts: dict[str, Any], s
         bundle, meshes = load_verified_meshes(bundle_path)
         report = verify_geometry_report(report_path, bundle_path)
         production_errors = validate_geometry_report(report, require_production=True)
+        # topologyReady must measure topology alone. Where the numbers came from is already reported
+        # by evidence-tier:diagnostic, and folding it in here would name an evidence verdict after a
+        # topology property.
+        topology_errors = validate_geometry_report(report, require_production=True, require_evidence_tier=False)
         provenance_verified, spec = _verify_bundle_provenance(bundle, bundle_path, manifest)
         capture, capture_failures = _verify_capture_manifest(capture_path, bundle, scene)
         capture_failures.extend(f"geometry-production:{error}" for error in production_errors)
@@ -374,7 +378,7 @@ def evaluate_glove_review(manifest: dict[str, Any], artifacts: dict[str, Any], s
         capture_failures.extend(f"surface-contract:{error}" for error in surface_errors)
         capture_failures.extend(spec_failures)
         handedness_ok = spec is not None and not any(error.startswith(("handedness:", "asymmetry:", "blank-form:")) for error in surface_errors)
-        metrics = _derived_metrics(report, bundle, capture, meshes, provenance_verified, not production_errors, handedness_ok)
+        metrics = _derived_metrics(report, bundle, capture, meshes, provenance_verified, not topology_errors, handedness_ok)
         failed.extend(capture_failures)
         failed.extend(_threshold_failures(metrics, scene))
         failed.extend(_calibration_provenance_failures(scene, root, bundle, report, capture))

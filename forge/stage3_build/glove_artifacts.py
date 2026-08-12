@@ -209,8 +209,12 @@ def load_verified_meshes(bundle_path: Path) -> tuple[dict[str, Any], list[dict[s
     return bundle, meshes
 
 
-def build_bundle_from_assembly(assembly: dict[str, Any], output_dir: Path, *, upstream: dict[str, Any] | None = None) -> tuple[Path, Path]:
-    geometry = build_glove_geometry(assembly)
+def build_bundle_from_geometry(geometry: dict[str, Any], output_dir: Path, *, upstream: dict[str, Any] | None = None) -> tuple[Path, Path]:
+    """Write the bundle and report for an already-derived geometry report."""
     bundle = write_model_bundle(geometry, output_dir, upstream=upstream)
     report = write_geometry_report(geometry, output_dir / "geometry-report.v2.json", bundle, upstream=upstream)
     return bundle, report
+
+
+def build_bundle_from_assembly(assembly: dict[str, Any], output_dir: Path, *, upstream: dict[str, Any] | None = None) -> tuple[Path, Path]:
+    return build_bundle_from_geometry(build_glove_geometry(assembly), output_dir, upstream=upstream)
