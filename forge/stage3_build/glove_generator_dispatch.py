@@ -16,6 +16,19 @@ def _digest(payload: Any) -> str:
     return canonical_hash(payload)
 
 
+def resolve_palmar_reference(manifest: dict[str, Any]) -> tuple[Path | None, str | None]:
+    """The palmar plate shapes the back surface. Absent one, the shell stays symmetric and says so."""
+    for view in manifest.get("sourceViews", []):
+        if not isinstance(view, dict) or view.get("role") != "palmar" or view.get("admission") != "admitted":
+            continue
+        if view.get("evidenceUse") not in {None, SURFACE_BEARING_EVIDENCE_USE}:
+            continue
+        path = Path(str(view.get("path")))
+        if path.is_file():
+            return path, str(view.get("id"))
+    return None, None
+
+
 def resolve_shell_reference(manifest: dict[str, Any]) -> tuple[Path, str]:
     """Pick the admitted view the shell outline is measured from.
 
@@ -100,7 +113,11 @@ def build_glove_model_from_artifacts(
     # The assembly is now the semantic panel/material inventory that surface regions map onto; the
     # geometry itself is measured from the reference rather than read from its hardcoded loops.
     reference, source_view_id = resolve_shell_reference(manifest)
-    geometry = build_glove_shell_geometry(reference, source_view_id=source_view_id)
+    palmar_reference, palmar_source_view_id = resolve_palmar_reference(manifest)
+    geometry = build_glove_shell_geometry(
+        reference, source_view_id=source_view_id,
+        palmar_reference=palmar_reference, palmar_source_view_id=palmar_source_view_id,
+    )
     bundle, report = build_bundle_from_geometry(geometry, output_dir, upstream=upstream)
     descriptor = json.loads(bundle.read_text(encoding="utf-8"))
     if descriptor.get("upstream") != upstream:

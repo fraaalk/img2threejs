@@ -58,6 +58,7 @@ VALID_PRIMITIVES = {
     "curve-sweep",
     "plane-card",
     "instanced-cluster",
+    "silhouette-inflation",
 }
 VALID_COMPONENT_LEVELS = {"macro", "meso", "micro"}
 VALID_COMPLEXITY_TIERS = {"unassessed", "simple", "moderate", "complex", "ultra-complex"}

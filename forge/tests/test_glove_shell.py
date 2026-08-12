@@ -102,6 +102,38 @@ class GloveShellTests(unittest.TestCase):
                 self.assertTrue(validate_shell_descriptor({DESCRIPTOR_KIND: broken}))
         self.assertTrue(validate_shell_descriptor({}))
 
+    def test_each_side_is_painted_by_the_view_that_saw_it(self):
+        """Panels become surface regions projected onto one shell, which is what
+        surfaceRegionEvidence already models. The rim is seen by neither front-axis plate."""
+        projection = self.geometry["surfaceProjection"]
+        self.assertEqual(projection["mode"], "orthographic-front-projection")
+        sides = {side["side"]: side for side in projection["sides"]}
+        self.assertEqual(sides["front"]["orientation"], "dorsal")
+        self.assertEqual(sides["back"]["orientation"], "palmar")
+        self.assertEqual(sides["front"]["uvRect"], [0.0, 0.0, 0.5, 1.0])
+        self.assertEqual(sides["back"]["uvRect"], [0.5, 0.0, 0.5, 1.0])
+        # Without a palmar plate the back cannot claim to be observed.
+        self.assertEqual(sides["back"]["unseenStrategy"], "mirror-symmetry")
+        self.assertEqual([entry["region"] for entry in projection["unseen"]], ["silhouette-rim"])
+
+    def test_uvs_place_each_side_in_its_own_atlas_half(self):
+        mesh = next(item for item in self.geometry["meshes"] if item["hand"] == "left")
+        front_z = {index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] > 0}
+        back_z = {index for index, vertex in enumerate(mesh["vertices"]) if vertex[2] < 0}
+        self.assertTrue(front_z and back_z)
+        self.assertTrue(all(mesh["uv0"][index][0] <= 0.5 for index in front_z))
+        self.assertTrue(all(mesh["uv0"][index][0] >= 0.5 for index in back_z))
+
+    def test_a_palmar_plate_makes_the_back_observed(self):
+        observed = build_glove_shell_geometry(
+            FIXTURE, source_view_id="glove-view-1-dorsal", grid=48,
+            palmar_reference=FIXTURE.parent / "palmar.png", palmar_source_view_id="glove-view-2-palmar",
+        )
+        back = next(side for side in observed["surfaceProjection"]["sides"] if side["side"] == "back")
+        self.assertEqual(back["sourceViewId"], "glove-view-2-palmar")
+        self.assertNotIn("unseenStrategy", back)
+        self.assertEqual(observed["derivation"]["backSurfaceSource"], "glove-view-2-palmar")
+
     def test_a_coarser_grid_that_erases_the_subject_is_refused(self):
         with self.assertRaises(ValueError):
             build_glove_shell_geometry(FIXTURE, source_view_id="glove-view-1-dorsal", grid=3)

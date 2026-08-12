@@ -103,7 +103,7 @@ PRIMITIVES = sorted(VALID_PRIMITIVES)
 # after a position-only weld -- box/cylinder/sphere/ellipsoid/torus/instanced-cluster
 # via their normal, benign UV-seam duplication, capsule via true construction (RAW,
 # no weld needed).
-EXPECTED_WELDED_WATERTIGHT = {"box", "cylinder", "sphere", "ellipsoid", "torus", "instanced-cluster", "extrude", "curve-sweep", "capsule", "cone"}
+EXPECTED_WELDED_WATERTIGHT = {"box", "cylinder", "sphere", "ellipsoid", "torus", "instanced-cluster", "extrude", "curve-sweep", "capsule", "cone", "silhouette-inflation"}
 # capsule needs no weld at all: built closed by construction.
 EXPECTED_WATERTIGHT_EVEN_RAW = {"capsule"}
 # Inherently open shapes by design (a real edge is CORRECT, not a defect): a flat
@@ -144,6 +144,37 @@ def _ground_blade_descriptor() -> dict:
     }
 
 
+def _silhouette_inflation_descriptor() -> dict:
+    """A hermetic probe mask: this sweep should not depend on a reference image.
+
+    The glove shell is closed by construction -- front and back of every solid cell plus one rim
+    quad per singly-owned cell edge -- so it belongs in the watertight set. A plain inset rectangle
+    exercises that closure without smuggling a fixture dependency into this file.
+    """
+    grid = 20
+    mask = [
+        "".join("1" if 2 <= row < grid - 2 and 2 <= col < grid - 2 else "0" for col in range(grid))
+        for row in range(grid)
+    ]
+    return {
+        "silhouetteInflation": {
+            "projection": "orthographic",
+            "boundsSpace": "component-local",
+            "grid": grid,
+            "mask": mask,
+            "frontShare": 0.5,
+            "backShare": 0.5,
+            "palmThicknessRatio": 0.34,
+            "aspect": 0.62,
+            "handSeparation": 0.6,
+            "hands": ["left", "right"],
+            "inflation": "chamfer-medial-axis-sqrt",
+            "sourceViewIds": ["probe-view"],
+            "depthAxis": {"state": "inferred", "source": "probe"},
+        }
+    }
+
+
 def build_probe_spec() -> dict:
     components = [
         {
@@ -160,6 +191,8 @@ def build_probe_spec() -> dict:
         }
         if primitive == "ground-blade":
             component["geometryDescriptor"] = _ground_blade_descriptor()
+        if primitive == "silhouette-inflation":
+            component["geometryDescriptor"] = _silhouette_inflation_descriptor()
         components.append(component)
     return {
         "targetName": "Primitive Watertightness Probe",

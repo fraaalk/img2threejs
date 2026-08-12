@@ -25,6 +25,7 @@ from forge.stage3_build.generate_threejs_factory import geometry_for
 from forge.stage3_build.glove_shell import DESCRIPTOR_KIND, build_glove_shell_geometry
 
 FIXTURE = Path(__file__).parent / "fixtures" / "glove_sport_v1" / "dorsal.png"
+PALMAR_FIXTURE = Path(__file__).parent / "fixtures" / "glove_sport_v1" / "palmar.png"
 GRID = 20
 SHOWCASE = os.environ.get("IMG2THREEJS_SHOWCASE_ROOT")
 REQUIRED = os.environ.get("IMG2THREEJS_REQUIRE_SHOWCASE") == "1"
@@ -76,14 +77,14 @@ class GloveShellRuntimeParityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             geometry_for("silhouette-inflation", {"id": "x", "geometryDescriptor": {}})
 
-    def test_runtime_geometry_matches_the_python_builder(self):
+    def _parity(self, geometry, hand: str) -> None:
         three = _three_module()
         if three is None:
             if REQUIRED:
                 self.fail("IMG2THREEJS_REQUIRE_SHOWCASE=1 but three was not found under IMG2THREEJS_SHOWCASE_ROOT")
             self.skipTest("set IMG2THREEJS_SHOWCASE_ROOT to a showcase checkout to run the runtime parity gate")
-        body = dict(self.descriptor[DESCRIPTOR_KIND])
-        body["hand"] = "left"
+        body = dict(geometry["geometryDescriptor"][DESCRIPTOR_KIND])
+        body["hand"] = hand
         harness = "\n".join(
             [
                 f"import * as THREE from {json.dumps(three.as_posix())};",
@@ -95,6 +96,7 @@ class GloveShellRuntimeParityTests(unittest.TestCase):
                 "  vertexCount: position.count,",
                 "  indexCount: index === null ? 0 : index.count,",
                 "  positions: Array.from(position.array as Float32Array).map((value) => Math.round(value * 1e4) / 1e4),",
+                "  uvs: Array.from((geometry.getAttribute('uv').array) as Float32Array).map((value) => Math.round(value * 1e4) / 1e4),",
                 "}));",
             ]
         )
@@ -107,14 +109,35 @@ class GloveShellRuntimeParityTests(unittest.TestCase):
             )
         self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
         runtime = json.loads(completed.stdout)
-
-        left = next(mesh for mesh in self.geometry["meshes"] if mesh["hand"] == "left")
-        self.assertEqual(runtime["vertexCount"], len(left["vertices"]))
-        self.assertEqual(runtime["indexCount"], len(left["indices"]) * 3)
-        expected = [round(value, 4) for vertex in left["vertices"] for value in vertex]
+        mesh = next(item for item in geometry["meshes"] if item["hand"] == hand)
+        self.assertEqual(runtime["vertexCount"], len(mesh["vertices"]))
+        self.assertEqual(runtime["indexCount"], len(mesh["indices"]) * 3)
+        expected = [round(value, 4) for vertex in mesh["vertices"] for value in vertex]
         self.assertEqual(len(runtime["positions"]), len(expected))
         worst = max(abs(a - b) for a, b in zip(runtime["positions"], expected))
         self.assertLess(worst, 1e-3, f"runtime and python vertices diverge by {worst}")
+        # UVs decide which plate paints which side, so a drift there is a texturing bug the
+        # position comparison cannot see.
+        expected_uv = [round(value, 4) for pair in mesh["uv0"] for value in pair]
+        self.assertEqual(len(runtime["uvs"]), len(expected_uv))
+        worst_uv = max(abs(a - b) for a, b in zip(runtime["uvs"], expected_uv))
+        self.assertLess(worst_uv, 1e-3, f"runtime and python uvs diverge by {worst_uv}")
+
+    def test_runtime_matches_python_for_both_hands(self):
+        for hand in ("left", "right"):
+            with self.subTest(hand=hand):
+                self._parity(self.geometry, hand)
+
+    def test_runtime_matches_python_with_a_palmar_back_surface(self):
+        """The asymmetric path is where the two implementations are easiest to drift apart."""
+        asymmetric = build_glove_shell_geometry(
+            FIXTURE, source_view_id="glove-view-1-dorsal", grid=GRID,
+            palmar_reference=PALMAR_FIXTURE, palmar_source_view_id="glove-view-2-palmar",
+        )
+        body = asymmetric["geometryDescriptor"][DESCRIPTOR_KIND]
+        self.assertIn("backMask", body)
+        self.assertNotEqual(body["frontShare"], body["backShare"])
+        self._parity(asymmetric, "left")
 
 
 if __name__ == "__main__":
