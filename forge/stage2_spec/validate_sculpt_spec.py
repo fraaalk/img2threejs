@@ -12,7 +12,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stage3_build"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from chirality import CHARACTER_LEFT_SIGN, check_pair, find_pairs  # noqa: E402
 from feature_acceptance_policy import feature_gate_failures, feature_review_policy
+from hair_profile import REJECTED_HAIR_PRIMITIVES, validate_hair_profile
 from sdf_primitives import validate_sdf_descriptor
 from subdivision import (
     ATTACHMENT_CYLINDER_SUBDIVISION_SOURCE_FACES,
@@ -53,6 +56,10 @@ VALID_PRIMITIVES = {
     "instanced-cluster",
 }
 VALID_COMPONENT_LEVELS = {"macro", "meso", "micro"}
+# Roles that are expected to declare `standProud`. Hair is the only one so far, and it earned the
+# place: it is the one subsystem that carried the requirement as prose while the garment beside it
+# carried the same requirement as a measurement.
+STAND_PROUD_EXPECTED_ROLES = {"hair"}
 VALID_COMPLEXITY_TIERS = {"unassessed", "simple", "moderate", "complex", "ultra-complex"}
 TERMINOLOGY_LIST_FIELDS = {"geometryTerms", "materialTerms", "lightingTerms"}
 VALID_REVIEW_ACTIONS = {"continue", "refine-spec", "refine-code", "request-input", "stop"}
@@ -334,6 +341,130 @@ def taper_risk(component_id: str, component: dict[str, Any]) -> tuple[str, str]:
             f"measures, or use 'tube' and say so.",
         )
     return ("OK", "")
+
+
+def validate_chirality(spec: dict[str, Any], errors: list[str], warnings: list[str]) -> None:
+    """Every `-l`/`-r` pair must be a sagittal MIRROR of each other, not a rotated copy.
+
+    WHY THIS IS A HARD GATE. Two chirality defects shipped in one figure and no gate saw either,
+    because both produce geometry that is internally tidy and only wrong against a convention that
+    lived in a comment.
+
+    The one this catches: a limb pair built by negating x AND z. That is a 180-degree rotation about
+    the vertical axis, and a rotation PRESERVES handedness, so both limbs come out the same hand.
+    Measured on the humanoid's thumb, whose tip sat at z +0.288 on one side and -0.288 on the other
+    where a mirror leaves z alone. Fixing it moved the hand region 46% closer to the reference in
+    the front view.
+
+    The one it CANNOT catch, stated here so nobody trusts a green result too far: a pair that is
+    wrong the SAME way on both sides is still a perfect mirror of itself. The humanoid's feet were
+    exactly that -- both had the big toe on the outer edge -- and this test passes them. That needs
+    `chirality.medial_lateral_bias` against a reference, which lives in the stage 4 gate.
+    """
+    components = spec.get("componentTree")
+    if not isinstance(components, list):
+        return
+
+    positions: dict[str, list[float]] = {}
+    for component in components:
+        if not isinstance(component, dict) or not component.get("id"):
+            continue
+        transform = component.get("transform")
+        offset = transform.get("position") if isinstance(transform, dict) else None
+        if isinstance(offset, list) and len(offset) == 3 and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in offset
+        ):
+            positions[str(component["id"])] = [float(v) for v in offset]
+
+    for right_id, left_id in find_pairs(positions):
+        ok, message = check_pair(right_id.rsplit("-", 1)[0], positions[right_id], positions[left_id])
+        if not ok:
+            errors.append(f"chirality: {message}")
+
+    # A component whose id says left but whose position says right. Separate from the pair test
+    # because it fires even when only one half of the pair exists.
+    for component_id, offset in sorted(positions.items()):
+        side = component_id.rsplit("-", 1)[-1] if "-" in component_id else ""
+        if side not in ("l", "r") or abs(offset[0]) < 1e-9:
+            continue
+        expected = CHARACTER_LEFT_SIGN if side == "l" else -CHARACTER_LEFT_SIGN
+        if (offset[0] > 0) != (expected > 0):
+            warnings.append(
+                f"quality: component {component_id!r} is named for the character's "
+                f"{'left' if side == 'l' else 'right'} but sits at x {offset[0]:+.4f}. With "
+                f"forward +Z and a right-handed frame the character's left is +X, so a pose or "
+                f"animation addressed by anatomical joint name would drive the wrong side."
+            )
+
+
+def validate_stand_proud(
+    component_id: str,
+    component: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+    proud_refs: list[tuple[str, str]],
+) -> None:
+    """A component may declare that it must stay OUTSIDE another component's surface.
+
+    WHY THIS IS A SCHEMA PROPERTY AND NOT AUTHORING DISCIPLINE. The humanoid demo holds the same
+    requirement twice, in two different ways, with two different outcomes. The garment holds it as a
+    measurement -- `sectionedLoft`'s `hug` marches every vertex outward along its own spoke until a
+    signed distance field reads at least `clearance` -- and it works. The hair holds it as a comment:
+
+        EVERY piece must stand proud of the skull at its own height. Where the skull is proud of the
+        hair, the head renders bald there.
+
+    Widening the hair side masses by hand broke that comment and nothing objected. Closure went
+    42.2% to 40.9%, worse on all six views, and dark coverage went DOWN because the widened mass had
+    slid off the skull. Measured on the archived captures, crown scalp exposure rose on every view,
+    by 14.9 points on the worst one.
+
+    `clearance` is how far outside the target surface the component must sit. `maxPush` caps how far
+    a vertex may travel to get there, and is required rather than optional: an uncapped march walks
+    inner vertices straight through the target and out the far side, closing the very gap the
+    component exists to leave.
+    """
+    proud = component.get("standProud")
+    if proud is None:
+        if str(component.get("role") or "").lower() in STAND_PROUD_EXPECTED_ROLES:
+            warnings.append(
+                f"quality: component {component_id!r} has role 'hair' but declares no standProud; "
+                f"nothing will stop it sinking into the head, which renders as a bald patch. "
+                f"Declare standProud against the head component, or say why it cannot sink."
+            )
+        return
+
+    if not isinstance(proud, dict):
+        errors.append(f"component {component_id!r} standProud must be an object")
+        return
+
+    against = proud.get("againstComponentId")
+    if not isinstance(against, str) or not against.strip():
+        errors.append(f"component {component_id!r} standProud.againstComponentId is required")
+    elif against == component_id:
+        errors.append(f"component {component_id!r} standProud references itself")
+    else:
+        proud_refs.append((component_id, against))
+
+    clearance = proud.get("clearance")
+    max_push = proud.get("maxPush")
+    if not is_number(clearance) or float(clearance) <= 0.0:
+        errors.append(
+            f"component {component_id!r} standProud.clearance must be a positive number "
+            f"(got {clearance!r}); a clearance of zero permits the surfaces to touch and z-fight"
+        )
+        return
+    if not is_number(max_push) or float(max_push) <= 0.0:
+        errors.append(
+            f"component {component_id!r} standProud.maxPush must be a positive number "
+            f"(got {max_push!r}); an uncapped march walks vertices through the target"
+        )
+        return
+    if float(max_push) < float(clearance):
+        errors.append(
+            f"component {component_id!r} standProud.maxPush ({max_push}) is below its clearance "
+            f"({clearance}); the march would stop before reaching the clearance it asks for"
+        )
 
 
 def flatness_risk(component_id: str, component: dict[str, Any]) -> tuple[str, str]:
@@ -1261,6 +1392,7 @@ def validate_components(
     }
     ids: set[str] = set()
     parent_refs: list[tuple[str, str]] = []
+    proud_refs: list[tuple[str, str]] = []
     for index, component in enumerate(components):
         if not isinstance(component, dict):
             errors.append(f"componentTree[{index}] must be an object")
@@ -1346,6 +1478,16 @@ def validate_components(
         if material and material not in material_ids:
             errors.append(f"component {component_id!r} references unknown material {material!r}")
         validate_geometry_descriptor(component_id, component.get("geometryDescriptor"), errors)
+        validate_stand_proud(component_id, component, errors, warnings, proud_refs)
+        # The decision left open in docs/UPGRADE_PLAN.md since v1.2 -- "hair cards vs
+        # tube-along-curve per lock" -- closed here by what this pipeline can actually emit.
+        if str(component.get("role") or "").lower() == "hair":
+            reason = REJECTED_HAIR_PRIMITIVES.get(str(primitive))
+            if reason:
+                errors.append(
+                    f"component {component_id!r} has role 'hair' and may not use primitive "
+                    f"{primitive!r}: {reason}"
+                )
         validate_subdivision_budget(
             component_id,
             primitive,
@@ -1402,6 +1544,13 @@ def validate_components(
     for component_id, parent in parent_refs:
         if parent not in ids:
             errors.append(f"component {component_id!r} references missing parent {parent!r}")
+    # Resolved after the loop, like parents: a component may legitimately stand proud of one that
+    # appears later in the tree, and a forward reference is not a defect.
+    for component_id, against in proud_refs:
+        if against not in ids:
+            errors.append(
+                f"component {component_id!r} standProud references missing component {against!r}"
+            )
     if not ids:
         errors.append("at least one component is required")
     if len(ids) == 1:
@@ -2508,6 +2657,8 @@ def validate_spec(spec: dict[str, Any]) -> tuple[list[str], list[str]]:
     validate_action_readiness(spec, errors, warnings)
     validate_self_correct_loop(spec, errors, warnings)
     validate_feature_review_targets(spec, errors, warnings)
+    validate_chirality(spec, errors, warnings)
+    validate_hair_profile(spec.get("hairProfile"), errors, warnings)
     validate_review_history(spec, errors, warnings)
     validate_visual_evidence_history(spec, errors)
     build_pass_ids = validate_build_passes(spec, errors, warnings)

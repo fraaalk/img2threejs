@@ -260,6 +260,8 @@
         "metalness": {"default": 0.0, "range": [0.0, 0.0]},
         "roughness": {"default": 0.45, "range": [0.3, 0.7]},
         "anisotropy": {"default": 0.65, "range": [0.4, 1.0]},
+        "sheen": {"default": 0.45, "range": [0.2, 0.8]},
+        "sheenRoughness": {"default": 0.35, "range": [0.2, 0.6]},
         "ior": {"default": 1.5, "range": [1.4, 1.6]}
       },
       "requiredMaps": ["map", "roughnessMap", "normalMap", "anisotropyMap"],
@@ -269,6 +271,34 @@
       "validationViews": ["neutral-studio", "grazing", "environment-reflection", "reference-beauty"],
       "limitations": ["Use geometry clumps or cards for silhouette; a normal map cannot replace hair volume"],
       "sourceRefs": ["three.mesh-physical", "pbrt.hair", "mit.material-recognition"]
+    },
+    {
+      "id": "hair.human.code-only",
+      "aliases": ["hair code only", "procedural hair", "untextured hair"],
+      "family": "hair",
+      "subtype": "human-code-only",
+      "finish": "strand-directional",
+      "model": "anisotropic-dielectric-approximation",
+      "recipeBasis": "inferred-starting-prior",
+      "renderPrior": {
+        "metalness": {"default": 0.0, "range": [0.0, 0.0]},
+        "roughness": {"default": 0.38, "range": [0.25, 0.6]},
+        "anisotropy": {"default": 0.8, "range": [0.5, 1.0]},
+        "sheen": {"default": 0.6, "range": [0.35, 0.9]},
+        "sheenRoughness": {"default": 0.3, "range": [0.15, 0.5]},
+        "ior": {"default": 1.55, "range": [1.45, 1.6]}
+      },
+      "requiredMaps": [],
+      "optionalMaps": [],
+      "visualCues": ["one broad highlight band running across the mass, not per-strand speculars", "root darker than tip", "facet edges read as clump boundaries"],
+      "confusableWith": ["hair.human", "fabric.velvet", "plastic.glossy"],
+      "validationViews": ["neutral-studio", "grazing", "reference-beauty"],
+      "limitations": [
+        "No maps by construction: this pipeline emits code, so anisotropyMap and normalMap are unavailable and every value here has to carry the whole strand impression on its own.",
+        "Priors are pushed above hair.human deliberately: on the reference scan the hair surface is smooth (radial roughness 0.00338 against a torso control of 0.00312) and its entire strand appearance lives in the diffuse and normal textures. Without those textures, sheen and anisotropy are the only remaining carriers.",
+        "Not calibrated against a reference render. No multipart GLB with separated hair geometry exists to fit these against, so they are a documented starting point and not a measurement."
+      ],
+      "sourceRefs": ["three.mesh-physical", "pbrt.hair"]
     },
     {
       "id": "fur.stylized",
