@@ -11,7 +11,7 @@ from forge.stage1_intake.glove_contracts import glove_readiness_errors
 from forge.stage2_spec.glove_assembly import build_glove_assembly, canonical_hash
 from forge.stage3_build.glove_artifacts import build_bundle_from_assembly, verify_geometry_report, verify_model_bundle
 from forge.stage3_build.glove_geometry import build_glove_geometry, validate_geometry_report
-from forge.stage4_review.glove_review import build_calibrated_scene, evaluate_glove_review
+from forge.stage4_review.glove_review import build_uncalibrated_scene, evaluate_glove_review
 from forge.stage4_review.glove_capture_evidence import derive_profile_capture_plan, finalize_glove_capture_manifest, init_glove_capture_manifest
 from forge.stage4_review.render_bridge import write_manifest
 from scripts.capture_threejs_playwright import capture
@@ -33,13 +33,26 @@ class GloveIntegrityV2Tests(unittest.TestCase):
             "digitTopology": [{"id": "digits", "opening": "cuff", "path": "unknown", "evidenceRefs": ["dorsal"]}],
             "openingPolicy": {"allowedBoundaryKinds": ["cuff"]},
         }
-        self.assertTrue(glove_readiness_errors({"formProfile": profile, "coverageMatrix": [], "surfaceRegionEvidence": []}))
+        views = [
+            {"id": "thumb", "role": "dorsal", "hash": "a" * 64, "evidenceUse": "target-geometry-and-surface"},
+            {"id": "palm", "role": "palmar", "hash": "h" * 64, "evidenceUse": "target-geometry-and-surface"},
+            {"id": "tech", "role": "three-quarter", "hash": "i" * 64, "evidenceUse": "technical-geometry-only"},
+        ]
+        self.assertTrue(glove_readiness_errors({"formProfile": profile, "coverageMatrix": [], "surfaceRegionEvidence": [], "sourceViews": views}))
         profile.update({"kind": "fingerless", "classificationState": "observed"})
         profile["digitTopology"] = [{"id": "index-cut", "opening": "open-cut", "path": "curved", "evidenceRefs": ["thumb"]}]
         coverage = [{"ownerId": "index-cut", "sourceViewId": "thumb", "sourceHash": "a" * 64, "cropDigest": "b" * 64, "visibility": "visible", "state": "covered", "renderCameras": ["finger-detail"]}]
-        surface = [{"id": "palmar-grip", "sourceCropDigest": "c" * 64, "comparisonMaskDigest": "d" * 64, "orientation": "palmar", "projectionTransform": {"kind": "uv"}, "channels": {"baseColor": "e" * 64, "normal": "f" * 64, "roughness": "g" * 64}}]
-        self.assertEqual(glove_readiness_errors({"formProfile": profile, "coverageMatrix": coverage, "surfaceRegionEvidence": surface}), [])
-        self.assertTrue(glove_readiness_errors({"formProfile": profile, "coverageMatrix": coverage, "surfaceRegionEvidence": [{**surface[0], "orientation": "mirrored"}]}))
+        surface = [{"id": "palmar-grip", "sourceViewId": "thumb", "sourceHash": "a" * 64, "sourceCropDigest": "c" * 64, "comparisonMaskDigest": "d" * 64, "orientation": "palmar", "projectionTransform": {"kind": "uv"}, "channels": {"baseColor": "e" * 64, "normal": "f" * 64, "roughness": "g" * 64}}]
+        ready = {"formProfile": profile, "coverageMatrix": coverage, "surfaceRegionEvidence": surface, "sourceViews": views}
+        self.assertEqual(glove_readiness_errors(ready), [])
+        self.assertTrue(glove_readiness_errors({**ready, "surfaceRegionEvidence": [{**surface[0], "orientation": "mirrored"}]}))
+        # Surface evidence borrowed from a technical view would paint another wear tier's finish.
+        self.assertTrue(glove_readiness_errors({**ready, "surfaceRegionEvidence": [{**surface[0], "sourceViewId": "tech", "sourceHash": "i" * 64}]}))
+        # The item's own plates must be the target views.
+        demoted = [{**views[0], "evidenceUse": "technical-geometry-only"}, *views[1:]]
+        self.assertTrue(glove_readiness_errors({**ready, "sourceViews": demoted}))
+        # A technical view cited only for geometry is fine.
+        self.assertEqual(glove_readiness_errors({**ready, "coverageMatrix": [{**coverage[0], "sourceViewId": "tech", "sourceHash": "i" * 64}]}), [])
 
     def test_profile_capture_plan_grows_from_critical_coverage(self):
         coverage = [
@@ -106,8 +119,8 @@ class GloveIntegrityV2Tests(unittest.TestCase):
             bundle_path, report_path = build_bundle_from_assembly(build_glove_assembly(), root / "bundle")
             capture_path = root / "capture-plan.json"
             subprocess.run(["node", str(ROOT / "runtime" / "glove-review" / "src" / "index.mjs"), str(bundle_path), str(capture_path)], check=True, cwd=ROOT)
-            artifacts = {"artifactRoot": str(root), "modelBundlePath": "bundle/glove-model-bundle.v2.json", "geometryReport": "bundle/geometry-report.v2.json", "captureManifest": "capture-plan.json", "artifactChain": {"valid": True}, **{key: 1.0 for key in build_calibrated_scene()["thresholds"]}}
-            report = evaluate_glove_review(_manifest(), artifacts, build_calibrated_scene())
+            artifacts = {"artifactRoot": str(root), "modelBundlePath": "bundle/glove-model-bundle.v2.json", "geometryReport": "bundle/geometry-report.v2.json", "captureManifest": "capture-plan.json", "artifactChain": {"valid": True}}
+            report = evaluate_glove_review(_manifest(), artifacts, build_uncalibrated_scene())
             self.assertEqual(report["verdict"], "reject")
             self.assertEqual(report["action"], "request-input")
             self.assertIn("evidence-tier:diagnostic", report["failedGates"])
@@ -117,7 +130,7 @@ class GloveIntegrityV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             bundle_path, geometry_path = build_bundle_from_assembly(build_glove_assembly(), root / "bundle")
-            scene = build_calibrated_scene()
+            scene = build_uncalibrated_scene()
             scene_path = root / "scene.json"
             scene_path.write_text(json.dumps(scene), encoding="utf-8")
             viewer = root / "viewer.html"

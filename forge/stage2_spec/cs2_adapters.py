@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 
@@ -216,11 +218,20 @@ def register_staged_adapter(family: str) -> None:
 
 
 def activate_staged_adapter_after_review(family: str, review_report: dict[str, Any]) -> None:
-    """Production activation requires a ready review report and a bound model digest."""
-    if not isinstance(review_report, dict) or review_report.get("verdict") != "ready":
-        raise ValueError("adapter activation requires a ready review report")
-    if not isinstance(review_report.get("modelBundleDigest"), str) or not review_report["modelBundleDigest"]:
-        raise ValueError("adapter activation requires a model bundle digest")
+    """Production activation requires a self-consistent ready review report.
+
+    Verdict plus a digest string is a two-key dict anyone can write, so the report's own digest is
+    recomputed by the module that produced it. Imported lazily with the checkout's dual-path idiom
+    (see new_sculpt_spec): this file is loaded both as forge.stage2_spec.cs2_adapters and, under
+    direct script execution, as stage2_spec.cs2_adapters with the repo root off sys.path.
+    """
+    try:
+        from forge.stage4_review.glove_review import verify_review_report
+    except ModuleNotFoundError:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from forge.stage4_review.glove_review import verify_review_report
+
+    verify_review_report(review_report)
     register_staged_adapter(family)
 
 

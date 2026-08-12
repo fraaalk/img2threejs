@@ -19,7 +19,7 @@ from forge.stage2_spec.new_pre_spec_assessment import make_payload
 from forge.stage2_spec.new_sculpt_spec import apply_cs2_manifest_evidence, apply_glove_template, make_spec
 from forge.stage2_spec.validate_sculpt_spec import validate_spec
 from forge.stage3_build.glove_generator_dispatch import build_glove_model_from_artifacts
-from forge.stage4_review.glove_review import build_calibrated_scene
+from forge.stage4_review.glove_review import build_uncalibrated_scene
 from forge.stage4_review.glove_capture_evidence import finalize_glove_capture_manifest, init_glove_capture_manifest
 from forge.stage4_review.render_bridge import write_manifest
 from scripts.capture_threejs_playwright import capture
@@ -57,10 +57,11 @@ def _build_inputs(out_dir: Path) -> tuple[dict[str, Any], dict[str, Any], dict[s
     spec = make_spec("Sport Gloves | Golden Fixture", manifest["sourceImage"], assessment)
     apply_glove_template(spec, manifest=manifest)
     apply_cs2_manifest_evidence(spec, manifest)
-    errors, warnings = validate_spec(spec)
-    strict_quality = [warning for warning in warnings if warning.startswith("quality:")]
-    if errors or strict_quality:
-        raise ValueError("e2e spec validation failed: " + "; ".join(errors + strict_quality))
+    errors, _warnings = validate_spec(spec)
+    # Readiness quality warnings are review-time gates: glove_readiness_errors reports them as
+    # coverage: failures. Aborting here would suppress the run that reports them.
+    if errors:
+        raise ValueError("e2e spec validation failed: " + "; ".join(errors))
     manifest_path = _write(out_dir / "cs2-intake.v1.json", manifest)
     assessment_path = _write(out_dir / "pre-spec-assessment.v1.json", assessment)
     spec_path = _write(out_dir / "object-sculpt-spec.json", spec)
@@ -116,7 +117,7 @@ def run_golden(out_dir: Path) -> dict[str, Any]:
     bundle_path = out_dir / "bundle" / "glove-model-bundle.v2.json"
     geometry_path = out_dir / "bundle" / "geometry-report.v2.json"
     scene_path = out_dir / "glove-review-scene-v2.json"
-    scene = build_calibrated_scene()
+    scene = build_uncalibrated_scene()
     _write(scene_path, scene)
     capture_path = _run_runtime(bundle_path, FIXTURE / "dorsal.png", scene, out_dir)
     artifacts = {
@@ -124,10 +125,10 @@ def run_golden(out_dir: Path) -> dict[str, Any]:
         "geometryReport": "bundle/geometry-report.v2.json", "captureManifest": "capture-manifest.v2.json",
     }
     metrics_path = _write(out_dir / "artifact-locator.v2.json", artifacts)
-    report = _run_review(manifest_path, metrics_path, scene_path, out_dir / "glove-review-report.v2.json", 1)
+    report = _run_review(manifest_path, metrics_path, scene_path, out_dir / "glove-review-report.v3.json", 1)
     if report.get("verdict") != "reject" or report.get("action") != "request-input":
         raise RuntimeError("synthetic fixture did not fail closed as diagnostic-only")
-    return {"fixture": "diagnostic", "verdict": report["verdict"], "action": report["action"], "report": str(out_dir / "glove-review-report.v2.json"), "modelBundleDigest": report.get("modelBundleDigest")}
+    return {"fixture": "diagnostic", "verdict": report["verdict"], "action": report["action"], "report": str(out_dir / "glove-review-report.v3.json"), "modelBundleDigest": report.get("modelBundleDigest")}
 
 
 def run_seeded_negative(out_dir: Path) -> dict[str, Any]:
@@ -135,7 +136,7 @@ def run_seeded_negative(out_dir: Path) -> dict[str, Any]:
     bundle_path = out_dir / "bundle" / "glove-model-bundle.v2.json"
     geometry_path = out_dir / "bundle" / "geometry-report.v2.json"
     scene_path = out_dir / "glove-review-scene-v2.json"
-    scene = build_calibrated_scene()
+    scene = build_uncalibrated_scene()
     _write(scene_path, scene)
     capture_path = _run_runtime(bundle_path, FIXTURE / "dorsal.png", scene, out_dir)
     reports: dict[str, Any] = {}

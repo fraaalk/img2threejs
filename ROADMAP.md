@@ -17,6 +17,23 @@ can plan around.
 | v1.3 | Quality & efficiency (Divine Eye) | 2026-07-22 | Deterministic multi-signal review harness, input-integrity and geometry-truth gates, reference-grounded texture/material analysis, CIEDE2000 colour math |
 | v1.4 | Weapon Pipeline | 2026-07-25–26 | CS2 image-matched reconstruction, provenance-aware intake and local search, projection-first finishes, family-specific adapters, structural review and component-coverage gates |
 
+### Wearable track (`wearable-v1.0`) — diagnostic, in progress
+
+CS2 static full-finger Sport Gloves route through `wearable-v1.0` / `cs2-glove-v1`. The review layer
+is hardened — nine independent measurements, typed thresholds read from the calibrated scene, a
+surface contract that measures per-hand separation, every failure named and fail-closed — but the
+track is **diagnostic-only** and cannot return `ready`. Two follow-ups remain, both blocked on work
+upstream of the review layer:
+
+- **`glove-artifact-negative-suite`** — artifact-level seeded negatives need a test-only cascade
+  re-signing helper, because most mutations trip the digest layer before reaching the gate under
+  test. Function-level gate isolation covers the review rules in the meantime.
+- **`glove-reference-conformance`** — the track makes **no claim about resemblance to the reference
+  image**. Blocked on two upstream defects: the azimuth-90 capture renders the flat panel slabs
+  edge-on, and the fixture's four per-role plates are not distinguishable from each other (0.58–0.82
+  silhouette IoU pairwise), so no silhouette- or gradient-based signal can separate a correct pairing
+  from a wrong one. Panel geometry is still a fixed template, not image-derived.
+
 ### v1.2 — Humanoid character generator
 
 Characters and hybrid subjects became first-class citizens of the pipeline, alongside a round of

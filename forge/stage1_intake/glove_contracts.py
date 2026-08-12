@@ -26,6 +26,14 @@ VALID_OPENING_KINDS: Final[frozenset[str]] = frozenset({"closed-tip", "open-cut"
 VALID_EPISTEMIC_STATES: Final[frozenset[str]] = frozenset(
     {"observed", "supported", "inferred", "implementation", "unknown"}
 )
+# Real CS2 sources ship two plates of the target item. The remaining required roles are filled by
+# technical views of the same glove model at another wear tier, which are sound for geometry and
+# must never supply surface evidence -- that would paint the wrong finish onto the target.
+VALID_EVIDENCE_USE: Final[frozenset[str]] = frozenset(
+    {"target-geometry-and-surface", "technical-geometry-only"}
+)
+SURFACE_BEARING_EVIDENCE_USE: Final[str] = "target-geometry-and-surface"
+TARGET_REQUIRED_VIEW_ROLES: Final[tuple[str, ...]] = ("dorsal", "palmar")
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -53,6 +61,8 @@ def validate_glove_view(view: Any, *, require_admitted: bool = False) -> list[st
         errors.append(f"source view {view.get('id', '<missing>')} is not admitted")
     if "duplicateOf" in view and view["duplicateOf"] is not None and not _nonempty_string(view["duplicateOf"]):
         errors.append("source view duplicateOf must be a string or null")
+    if "evidenceUse" in view and view["evidenceUse"] not in VALID_EVIDENCE_USE:
+        errors.append(f"source view evidenceUse must be one of {', '.join(sorted(VALID_EVIDENCE_USE))}")
     return errors
 
 
@@ -105,17 +115,30 @@ def _validate_coverage_matrix(matrix: Any) -> list[str]:
     return errors
 
 
-def _validate_surface_regions(regions: Any) -> list[str]:
+def _validate_surface_regions(regions: Any, views: Any = None) -> list[str]:
     if not isinstance(regions, list):
         return ["extensions.glove.surfaceRegionEvidence must be a list"]
+    by_id = {
+        str(view.get("id")): view
+        for view in (views if isinstance(views, list) else [])
+        if isinstance(view, dict) and _nonempty_string(view.get("id"))
+    }
     errors: list[str] = []
     for index, region in enumerate(regions):
         if not isinstance(region, dict):
             errors.append(f"surfaceRegionEvidence[{index}] must be an object")
             continue
-        for field in ("id", "sourceCropDigest", "comparisonMaskDigest", "orientation"):
+        for field in ("id", "sourceCropDigest", "comparisonMaskDigest", "orientation", "sourceViewId", "sourceHash"):
             if not _nonempty_string(region.get(field)):
                 errors.append(f"surfaceRegionEvidence[{index}].{field} is required")
+        source_view = by_id.get(str(region.get("sourceViewId")))
+        if by_id and source_view is None:
+            errors.append(f"surfaceRegionEvidence[{index}].sourceViewId names an unknown source view")
+        elif source_view is not None:
+            if str(region.get("sourceHash")) != str(source_view.get("hash")):
+                errors.append(f"surfaceRegionEvidence[{index}].sourceHash does not match its source view")
+            if source_view.get("evidenceUse") != SURFACE_BEARING_EVIDENCE_USE:
+                errors.append(f"surfaceRegionEvidence[{index}] takes surface evidence from a non-target view")
         transform = region.get("projectionTransform")
         if not isinstance(transform, dict) or transform.get("kind") not in {"uv", "planar", "projected"}:
             errors.append(f"surfaceRegionEvidence[{index}].projectionTransform is invalid")
@@ -131,7 +154,17 @@ def glove_readiness_errors(extension: Any) -> list[str]:
     """Strict anatomy and surface proof required before an artifact may claim ready."""
     if not isinstance(extension, dict):
         return ["extensions.glove must be an object"]
-    errors = _validate_form_profile(extension.get("formProfile")) + _validate_coverage_matrix(extension.get("coverageMatrix")) + _validate_surface_regions(extension.get("surfaceRegionEvidence"))
+    views = extension.get("sourceViews")
+    errors = _validate_form_profile(extension.get("formProfile")) + _validate_coverage_matrix(extension.get("coverageMatrix")) + _validate_surface_regions(extension.get("surfaceRegionEvidence"), views)
+    by_role = {
+        view.get("role"): view
+        for view in (views if isinstance(views, list) else [])
+        if isinstance(view, dict)
+    }
+    for role in TARGET_REQUIRED_VIEW_ROLES:
+        view = by_role.get(role)
+        if view is None or view.get("evidenceUse") != SURFACE_BEARING_EVIDENCE_USE:
+            errors.append(f"required target view {role} must be classed {SURFACE_BEARING_EVIDENCE_USE}")
     if not isinstance(extension.get("coverageMatrix"), list) or not extension["coverageMatrix"]:
         errors.append("coverage matrix must prove at least one observable owner")
     if not isinstance(extension.get("surfaceRegionEvidence"), list) or not extension["surfaceRegionEvidence"]:
@@ -225,7 +258,7 @@ def validate_glove_extension(extension: Any, *, require_complete_views: bool = T
     if "coverageMatrix" in extension:
         errors.extend(_validate_coverage_matrix(extension["coverageMatrix"]))
     if "surfaceRegionEvidence" in extension:
-        errors.extend(_validate_surface_regions(extension["surfaceRegionEvidence"]))
+        errors.extend(_validate_surface_regions(extension["surfaceRegionEvidence"], extension.get("sourceViews")))
     return errors
 
 

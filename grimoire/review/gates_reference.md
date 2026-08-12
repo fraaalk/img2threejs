@@ -3,6 +3,18 @@
 Read this reference completely before any visual review or `continue` decision. `SKILL.md` keeps
 only the executable order and one-line summary; this file defines the mandatory gate behavior.
 
+- **Wearable track (`wearable-v1.0`) gates**: `forge/stage4_review/glove_review.py` publishes nine
+  independent boolean measurements (`provenanceVerified`, `topologyReady`, `handednessCorrect`,
+  `finiteGeometry`, `selfIntersectionFree`, `penetrationFree`, `minimumThicknessMeasured`,
+  `uvMaterialOwnership`, `runtimeDeterministic`). Thresholds are typed records read from the review
+  scene — a boolean gate is compared by identity and there is no fallback to module constants.
+  `capture_sanity` is a precondition (`capture-sanity:<role>:<reason>`), never a scored metric. The
+  surface contract *measures* per-hand separation rather than reading the geometry report's
+  `diagnosticOverlapSeparate` declaration. Concerns that cannot yet be measured
+  (`seamBoundaryCorrespondence`, `productionManifold`, `referenceResemblance`) are published under
+  `unmeasured` with a reason. **This track makes no reference-resemblance claim**, so the Divine Eye
+  render-vs-reference gates below are not run by it; judging likeness stays a manual step. Contract:
+  `docs/CS2_GLOVE_WORKFLOW.md`.
 - **Suitability + reference integrity**: pass / conditional / reject before any planning
   (`grimoire/intake/validation_rubric.md`), AND every reference admitted via
   `forge/stage1_intake/check_reference_admission.py` (rejects empty/fragmented/tiny/duplicate/

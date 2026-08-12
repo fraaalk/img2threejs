@@ -432,6 +432,17 @@ pistol adapter, and (after its evidence gates pass) static full-finger **Sport G
 subtypes, and unknown knife subtypes must stop with `unsupported-family` or
 `unsupported-subtype`; they must not receive another family's component tree as a generic fallback.
 
+The `wearable-v1.0` review publishes nine independent measurements with typed thresholds read from
+the review scene, and it **makes no claim about resemblance to the reference image** — no gate
+compares the render to the reference, so the review's verdict says nothing about likeness. The
+render-vs-reference gate below is an obligation on the agent performing a reconstruction, and its
+tooling (`divine_eye`, `diagnose_render`, `make_comparison_sheet`) is not glove-specific — it is the
+wearable *review pipeline* that produces no automated resemblance measurement, not the gate that is
+waived. `capture_sanity` runs there as a precondition, never as a scored metric: a framing
+defect is a capture defect. Full gate table, the two permitted scene threshold statuses, and the
+recorded known defects (coincident hands, hardcoded panel loops, the quarantined
+`thumb-side-profile` capture): `docs/CS2_GLOVE_WORKFLOW.md`.
+
 ### Layer contract
 
 Pass these records between layers. Do not copy an informal vision description into the next stage:

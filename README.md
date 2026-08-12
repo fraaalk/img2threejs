@@ -268,6 +268,8 @@ The arc: assets (v1.4–v1.5) → worlds (v1.6–v1.7) → production (v1.8–v1
 
 A single image cannot reveal hidden sides or guarantee exact geometry. The skill states plainly when output is approximate, stylized, or low-poly, and infers unseen faces by mirroring visible ones rather than faking confidence. It is strong for hard-surface objects; characters are stylized reconstructions, not photoreal likeness. "This cannot reach the requested fidelity from this image" is a valid, expected result.
 
+**The wearable track (`wearable-v1.0`, CS2 Sport Gloves) is diagnostic-only, and deliberately narrow about what it claims.** It gates topology, provenance, handedness, thickness, penetration and runtime determinism — nine independent measurements with typed thresholds — but **no gate compares the render to the reference image**, so its verdict says nothing about whether the model looks like the reference. Judging likeness remains a manual step with the general review tools. Its panel geometry is a fixed template rather than image-derived, and it cannot return `ready`. The known defects are recorded rather than hidden: see [docs/CS2_GLOVE_WORKFLOW.md](docs/CS2_GLOVE_WORKFLOW.md).
+
 ---
 
 ## Star history

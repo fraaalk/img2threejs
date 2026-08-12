@@ -10,7 +10,7 @@ from forge._shared.pipeline_routing import classification_from_cs2_manifest, res
 from forge.stage1_intake.cs2_manifest import build_classification_record, build_manifest
 from forge.stage1_intake.glove_contracts import build_glove_extension, validate_glove_extension
 from forge.stage2_spec.cs2_adapters import activate_staged_adapter_after_review, disable_staged_adapter, get_family_adapter, resolve_family_adapter
-from forge.stage2_spec.glove_assembly import build_glove_assembly, resample_ordered_spans, validate_glove_assembly
+from forge.stage2_spec.glove_assembly import build_glove_assembly, canonical_hash, resample_ordered_spans, validate_glove_assembly
 from forge.stage2_spec.glove_state import can_emit_build, can_emit_spec, intake_contract
 from forge.stage2_spec.new_pre_spec_assessment import make_payload
 from forge.stage2_spec.new_sculpt_spec import apply_cs2_manifest_evidence, apply_glove_template, make_spec
@@ -20,7 +20,7 @@ from forge.stage3_build.glove_artifacts import build_bundle_from_assembly, verif
 from forge.stage3_build.generate_threejs_factory import generate
 from forge.stage3_build.glove_geometry import build_glove_geometry, triangulate_panel_loop, validate_geometry_report
 from forge.stage3_build.glove_generator_dispatch import build_glove_model_from_artifacts
-from forge.stage4_review.glove_review import build_calibrated_scene, build_uncalibrated_scene, evaluate_glove_review, validate_glove_scene
+from forge.stage4_review.glove_review import METRIC_KINDS, REPORT_VERSION, build_uncalibrated_scene, evaluate_glove_review, validate_glove_scene
 from forge.stage4_review.glove_seeded_fixtures import seeded_fixture_names, seeded_negative_metrics
 from forge.stage4_review.glove_surface_gates import mutate_surface_contract, validate_glove_surface_contract
 
@@ -129,10 +129,16 @@ class GloveAcceptanceTests(unittest.TestCase):
         spec = apply_glove_template(make_spec("Sport Gloves", current["sourceImage"]), manifest=current)
         apply_cs2_manifest_evidence(spec, current)
         geometry = build_glove_geometry(build_glove_assembly())
-        self.assertEqual(validate_glove_surface_contract(geometry, spec), [])
-        for mutation in ("rotation-only", "flipped-orientation", "missing-overrides", "blind-finish-mirroring", "pbr-channel-alias"):
+        # The fixture's two hands are coincident: the right hand is the left with x negated, so
+        # the panels symmetric about x=0 occupy the same volume. The contract measures that
+        # instead of reading the report's diagnosticOverlapSeparate declaration, which is True.
+        self.assertTrue(geometry["diagnosticOverlapSeparate"])
+        baseline = validate_glove_surface_contract(geometry, spec)
+        self.assertEqual([error.split(":")[0:2] for error in baseline], [["blank-form", "hands-coincident"]])
+        for mutation in ("rotation-only", "flipped-orientation", "missing-overrides", "blind-finish-mirroring", "pbr-channel-alias", "coincident-hands", "no-inspectable-material", "mesh-material-not-in-spec"):
             mutated_geometry, mutated_spec = mutate_surface_contract(geometry, spec, mutation)
-            self.assertTrue(validate_glove_surface_contract(mutated_geometry, mutated_spec), mutation)
+            mutated = set(validate_glove_surface_contract(mutated_geometry, mutated_spec))
+            self.assertTrue(mutated - set(baseline), mutation)
 
     def test_bundle_dispatch_and_digests(self):
         current = manifest()
@@ -160,7 +166,7 @@ class GloveAcceptanceTests(unittest.TestCase):
         observation = {
             "formProfile": {"kind": "full-finger", "classificationState": "observed", "digitTopology": [{"id": "index", "opening": "closed-tip", "path": "curved", "evidenceRefs": [dorsal["id"]]}], "openingPolicy": {"allowedBoundaryKinds": ["closed-tip", "cuff"]}},
             "coverageMatrix": [{"ownerId": "dorsal", "sourceViewId": dorsal["id"], "sourceHash": dorsal["hash"], "cropDigest": "crop", "visibility": "visible", "state": "covered", "renderCameras": ["dorsal"]}],
-            "surfaceRegionEvidence": [{"id": "dorsal", "sourceCropDigest": "crop", "comparisonMaskDigest": "mask", "orientation": "dorsal", "projectionTransform": {"kind": "uv"}, "channels": {"baseColor": {"source": "reference"}}}],
+            "surfaceRegionEvidence": [{"id": "dorsal", "sourceViewId": dorsal["id"], "sourceHash": dorsal["hash"], "sourceCropDigest": "crop", "comparisonMaskDigest": "mask", "orientation": "dorsal", "projectionTransform": {"kind": "uv"}, "channels": {"baseColor": {"source": "reference"}}}],
             "evidence": [{"id": "observed-topology", "sourceRefs": [dorsal["id"]], "region": "topology", "visibility": "visible", "epistemicState": "observed", "confidence": 0.9, "contradictions": []}],
             "sourceUse": {dorsal["id"]: "target-geometry-and-surface"},
         }
@@ -170,6 +176,38 @@ class GloveAcceptanceTests(unittest.TestCase):
         bad["coverageMatrix"][0]["sourceHash"] = "wrong"
         with self.assertRaises(ValueError):
             apply_glove_observation(current, bad)
+
+    def test_surface_evidence_may_only_come_from_the_target_item(self):
+        """A real CS2 item ships two plates; the other required roles are borrowed technical views
+        of the same glove at another wear tier. Those are sound for geometry and would paint the
+        wrong finish, so surface evidence must be refused from them."""
+        current = manifest()
+        views = current["extensions"]["glove"]["sourceViews"]
+        dorsal, palmar, technical = views[0], views[1], views[2]
+        use = {
+            dorsal["id"]: "target-geometry-and-surface",
+            palmar["id"]: "target-geometry-and-surface",
+            technical["id"]: "technical-geometry-only",
+        }
+
+        def observation(region_view, source_use=use, source_hash=None):
+            return {
+                "formProfile": {"kind": "full-finger", "classificationState": "observed", "digitTopology": [{"id": "index", "opening": "closed-tip", "path": "curved", "evidenceRefs": [dorsal["id"]]}], "openingPolicy": {"allowedBoundaryKinds": ["closed-tip", "cuff"]}},
+                "coverageMatrix": [{"ownerId": "dorsal", "sourceViewId": dorsal["id"], "sourceHash": dorsal["hash"], "cropDigest": "crop", "visibility": "visible", "state": "covered", "renderCameras": ["dorsal"]}],
+                "surfaceRegionEvidence": [{"id": "region", "sourceViewId": region_view["id"], "sourceHash": source_hash or region_view["hash"], "sourceCropDigest": "crop", "comparisonMaskDigest": "mask", "orientation": "dorsal", "projectionTransform": {"kind": "uv"}, "channels": {"baseColor": {"source": "plate"}}}],
+                "evidence": [{"id": "observed", "sourceRefs": [dorsal["id"]], "region": "shell", "visibility": "visible", "epistemicState": "observed", "confidence": 0.9, "contradictions": []}],
+                "sourceUse": source_use,
+            }
+
+        merged = apply_glove_observation(current, observation(dorsal))
+        self.assertEqual(merged["extensions"]["glove"]["sourceViews"][0]["evidenceUse"], "target-geometry-and-surface")
+
+        with self.assertRaises(ValueError):  # colour borrowed from another wear tier
+            apply_glove_observation(current, observation(technical))
+        with self.assertRaises(ValueError):  # surface evidence not bound to its view's bytes
+            apply_glove_observation(current, observation(dorsal, source_hash="wrong"))
+        with self.assertRaises(ValueError):  # unclassified provenance
+            apply_glove_observation(current, observation(dorsal, source_use={dorsal["id"]: "whatever"}))
 
     def test_glove_factory_preserves_cs2_identity_and_runtime_hooks(self):
         current = manifest()
@@ -184,17 +222,35 @@ class GloveAcceptanceTests(unittest.TestCase):
         self.assertIn('options.disableMaterialMaps ? null', generated)
 
     def test_review_scenes_and_seeded_fixtures(self):
-        self.assertEqual(validate_glove_scene(build_uncalibrated_scene()), [])
-        calibrated = build_calibrated_scene()
-        self.assertTrue(validate_glove_scene(calibrated, calibrated=True))
+        scene = build_uncalibrated_scene()
+        self.assertEqual(validate_glove_scene(scene), [])
+        # The diagnostic scene carries no thresholds, so it can never authorize readiness.
+        self.assertTrue(validate_glove_scene(scene, calibrated=True))
+        for retired in ("diagnostic-frozen-v1", "frozen-from-golden-and-seeded-negative-measurements"):
+            self.assertTrue(validate_glove_scene({**scene, "thresholdStatus": retired}))
         self.assertEqual(len(seeded_fixture_names()), 8)
         for case in seeded_fixture_names():
             self.assertTrue(seeded_negative_metrics(case))
 
+    def test_activation_requires_a_self_consistent_report(self):
+        forged = [
+            {"verdict": "ready", "modelBundleDigest": "digest"},
+            {"version": REPORT_VERSION, "verdict": "ready", "modelBundleDigest": "digest", "failedGates": [], "reportDigest": "0" * 64},
+            {"version": REPORT_VERSION, "verdict": "ready", "modelBundleDigest": "digest", "failedGates": ["topologyReady"]},
+        ]
+        for payload in forged:
+            with self.subTest(payload=sorted(payload)):
+                with self.assertRaises(ValueError):
+                    activate_staged_adapter_after_review("glove", payload)
+        with self.assertRaises(ValueError):
+            get_family_adapter("glove", "sport-gloves")
+
     def test_activation_and_rollback_are_explicit(self):
         with self.assertRaises(ValueError):
             get_family_adapter("glove", "sport-gloves")
-        activate_staged_adapter_after_review("glove", {"verdict": "ready", "modelBundleDigest": "digest"})
+        report = {"version": REPORT_VERSION, "verdict": "ready", "modelBundleDigest": "digest", "failedGates": []}
+        report["reportDigest"] = canonical_hash(report)
+        activate_staged_adapter_after_review("glove", report)
         self.assertEqual(get_family_adapter("glove", "sport-gloves").family, "glove")
         disable_staged_adapter("glove")
         with self.assertRaises(ValueError):

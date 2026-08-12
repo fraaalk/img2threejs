@@ -20,7 +20,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from forge.stage1_intake.glove_contracts import glove_manifest_errors, validate_glove_extension
+from forge.stage1_intake.glove_contracts import VALID_EVIDENCE_USE, glove_manifest_errors, validate_glove_extension
 
 
 def apply_glove_observation(manifest: dict[str, Any], observation: dict[str, Any]) -> dict[str, Any]:
@@ -46,6 +46,9 @@ def apply_glove_observation(manifest: dict[str, Any], observation: dict[str, Any
     unknown_source_use = sorted(set(source_use) - set(known))
     if unknown_source_use:
         raise ValueError("observation.sourceUse names unknown views: " + ", ".join(unknown_source_use))
+    invalid_use = sorted(f"{key}={value!r}" for key, value in source_use.items() if value not in VALID_EVIDENCE_USE)
+    if invalid_use:
+        raise ValueError("observation.sourceUse must be " + " or ".join(sorted(VALID_EVIDENCE_USE)) + ": " + ", ".join(invalid_use))
 
     for index, entry in enumerate(observation["coverageMatrix"]):
         if not isinstance(entry, dict):
@@ -56,6 +59,25 @@ def apply_glove_observation(manifest: dict[str, Any], observation: dict[str, Any
             raise ValueError(f"coverageMatrix[{index}] names unknown source view {source_id!r}")
         if str(entry.get("sourceHash")) != str(view.get("hash")):
             raise ValueError(f"coverageMatrix[{index}] sourceHash does not match {source_id}")
+
+    # Surface evidence gets the same provenance discipline as coverage, plus one rule coverage
+    # does not need: colour may only come from the target item. A technical view borrowed from
+    # another wear tier is legitimate for geometry and would otherwise paint the wrong finish.
+    for index, region in enumerate(observation["surfaceRegionEvidence"]):
+        if not isinstance(region, dict):
+            raise ValueError(f"observation.surfaceRegionEvidence[{index}] must be an object")
+        source_id = region.get("sourceViewId")
+        view = known.get(str(source_id))
+        if view is None:
+            raise ValueError(f"surfaceRegionEvidence[{index}] names unknown source view {source_id!r}")
+        if str(region.get("sourceHash")) != str(view.get("hash")):
+            raise ValueError(f"surfaceRegionEvidence[{index}] sourceHash does not match {source_id}")
+        use = source_use.get(str(source_id), view.get("evidenceUse"))
+        if use != "target-geometry-and-surface":
+            raise ValueError(
+                f"surfaceRegionEvidence[{index}] takes surface evidence from {source_id} classed {use!r}; "
+                "only a target-geometry-and-surface view may supply surface evidence"
+            )
 
     for index, claim in enumerate(observation["evidence"]):
         if not isinstance(claim, dict) or not isinstance(claim.get("sourceRefs"), list):

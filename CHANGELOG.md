@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING** — `wearable-v1.0` glove review report is now `glove-review-report.v3`. The thirteen
+  metrics carried nine aliases of one topology boolean while their `0.85`/`0.95` thresholds were
+  unreachable (every value was `float(bool)`), and the evaluator never read the calibrated scene's
+  thresholds at all, so calibration output was decorative. The report now publishes nine independent
+  measurements, each named for what it measures — `crossSectionVariation` became
+  `minimumThicknessMeasured` because it measured minimum thickness, and `handednessCorrect` now
+  derives from the surface contract instead of from topology readiness.
+- Thresholds are typed records (`{kind, threshold}`) read from the review scene. A boolean gate is
+  compared by identity, the threshold key set must equal the metric set, and a scene with no
+  thresholds fails `calibration:thresholds-absent` — there is no fallback to module constants,
+  because a silent default is what made these gates inert. Calibration must bind
+  `calibration.artifactDigests` to the artifacts the evaluator actually loaded, and the calibrator
+  now emits `1.0` for boolean gates instead of the midpoint `0.5` that no boolean gate could satisfy.
+- Scene threshold statuses reduced from four to two (`uncalibrated`,
+  `verified-artifact-calibration-v2`); the misnamed `build_calibrated_scene` and two orphaned scene
+  fixtures are removed.
+- `validate_glove_surface_contract` is now a pipeline gate, and was strengthened first so promoting
+  it means something: it **measures** per-hand separation instead of reading the geometry report's
+  hardcoded `diagnosticOverlapSeparate`, and it requires an inspectable material set. Previously
+  `validate_glove_surface_contract(geometry, {})` returned no errors — an empty spec passed clean.
+- All metric derivation and threshold reading moved inside the evaluator's exception boundary. A
+  missing artifact or malformed threshold is now a named failure with a written report and exit `1`,
+  not a traceback and exit `2`.
+- `activate_staged_adapter_after_review` verifies the report version, recomputes `reportDigest`, and
+  requires empty `failedGates`; it previously accepted any two-key dict.
+
+### Fixed
+- `forge/tests/run_glove_e2e.py` ran no longer: both commands documented in
+  `docs/CS2_GLOVE_WORKFLOW.md` tracebacked because spec readiness `quality:` warnings were promoted
+  to fatal at spec-build time — the same deficiencies the review reports as `coverage:` gates, so the
+  abort suppressed the run that would report them. No test imported the file, so nothing noticed.
+  `forge/tests/test_glove_e2e_harness.py` now runs the golden invocation in the suite.
+
 ### Added
+- `forge/tests/test_glove_gate_isolation.py` — function-level gate isolation with exact-set
+  assertions for every review rule. Previously the verdict was `reject` for every possible input, so
+  no assertion could distinguish a working gate from a deleted one.
+- `capture_sanity` runs as a wearable-track precondition (`capture-sanity:<role>:<reason>`), never a
+  scored metric. The `thumb-side-profile` capture is quarantined with its defect recorded: at
+  azimuth 90 the flat panel slabs render edge-on and the foreground mask collapses to whole-frame.
+- Concerns that cannot be measured are published under `unmeasured` with a reason rather than as a
+  derived value — including `referenceResemblance`: the wearable track makes no claim about
+  resemblance to the reference image, so its verdict says nothing about likeness.
 - Add `runtime/scripts/export_mesh_geometry.mjs`, the mesh dumper `SKILL.md` already instructed
   callers to run. It did not exist and neither did `runtime/`, so `self_intersection.py` and
   `geometry_integrity.py` had no producer in this repo and their gates were never runnable while

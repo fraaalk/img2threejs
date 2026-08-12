@@ -14,7 +14,7 @@ from forge.stage2_spec.new_pre_spec_assessment import make_payload
 from forge.stage2_spec.new_sculpt_spec import apply_glove_template, make_spec
 from forge.stage3_build.glove_artifacts import build_bundle_from_assembly, verify_model_bundle
 from forge.stage3_build.glove_geometry import build_glove_geometry, validate_geometry_report
-from forge.stage4_review.glove_review import build_uncalibrated_scene, evaluate_glove_review, validate_glove_scene
+from forge.stage4_review.glove_review import METRIC_KINDS, REPORT_VERSION, build_uncalibrated_scene, evaluate_glove_review, validate_glove_scene
 
 
 ROOT = Path(__file__).resolve().parent
@@ -88,12 +88,19 @@ class GlovePipelineTest(unittest.TestCase):
         self.assertEqual(validate_glove_scene(scene), [])
         self.assertEqual(scene["thresholdStatus"], "uncalibrated")
 
-    def test_review_rejects_mixed_bundle_and_missing_evidence(self) -> None:
+    def test_review_names_a_missing_artifact_locator_and_measures_nothing(self) -> None:
+        # Supplying scalar metrics used to look like a passing chain; they are ignored, so this
+        # asserts what the evaluator actually does with an absent locator: name it, and report
+        # every metric as inconclusive rather than omitting or passing them.
         manifest = self.manifest()
-        inputs = {key: 1.0 for key in ("evidenceCoverage", "graphCompleteness", "seamBoundaryCorrespondence", "attachmentContinuity", "finiteGeometry", "selfIntersectionFree", "penetrationFree", "productionManifold", "crossSectionVariation", "handednessCorrect", "asymmetryPreserved", "uvMaterialOwnership", "runtimeDeterministic")}
-        inputs["captures"] = [{"role": "dorsal", "modelBundleDigest": "wrong"}]
-        review = evaluate_glove_review(manifest, inputs, build_uncalibrated_scene())
-        self.assertEqual(review["verdict"], "reject")
+        review = evaluate_glove_review(manifest, {"captures": [{"role": "dorsal", "modelBundleDigest": "wrong"}]}, build_uncalibrated_scene())
+        self.assertEqual((review["verdict"], review["version"]), ("reject", REPORT_VERSION))
+        self.assertTrue([gate for gate in review["failedGates"] if gate.startswith("artifact-chain:")])
+        self.assertEqual(
+            {gate.split(":", 1)[1] for gate in review["failedGates"] if gate.startswith("metric-inconclusive:")},
+            set(METRIC_KINDS),
+        )
+        self.assertEqual(review["metrics"], {})
 
 
 if __name__ == "__main__":
