@@ -375,8 +375,15 @@ def project_atlas_uv(mesh: dict[str, Any], *, flip_u: bool = False, frame: dict[
             # in one image, so a u past 1.0 in the dorsal half would sample the palmar half rather than
             # the dorsal plate's edge. Parts of the form that reach outside the measured silhouette --
             # the thumb, the fingertips -- take the plate's edge colour, which the atlas dilates.
+            # v runs DOWNWARD from the frame's top, because the atlas is uploaded with `flipY = false`:
+            # texture v=0 is the first row in memory, that row is the image's top, and the atlas's top row is
+            # the plate's top row -- the fingertips. Measuring v upward from the frame's bottom put the
+            # model's fingertips at v=1 and so on the atlas's LAST row, and every glove wore its cuff on its
+            # fingertips and its fingertips at its wrist. It survived a dozen renders unnoticed because a
+            # glove is nearly symmetric in its colour blocking end to end; it was settled by comparing the
+            # atlas's rows against the plate's crop row for row, not by looking at either.
             u = min(1.0, max(0.0, (position[0] - lows[0]) / spans[0]))
-            v = min(1.0, max(0.0, (position[1] - lows[1]) / spans[1]))
+            v = min(1.0, max(0.0, (highs[1] - position[1]) / spans[1]))
             if flip_u:
                 u = 1.0 - u
             out_positions.append(position)

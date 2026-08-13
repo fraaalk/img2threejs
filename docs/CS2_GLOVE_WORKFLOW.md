@@ -98,6 +98,26 @@ carries no classification and will fail readiness with `required target view <ro
 target-geometry-and-surface` until an observation supplies it. `.img2threejs/hedge-maze-bs-v1/glove-observation.json`
 is a worked example from a real reconstruction.
 
+## The form gate, and why the plates are withheld
+
+`surfaceAtlas` is attached only when the form measures **five separate digits** — the count of solids a
+horizontal line crosses through the digit band, taken from the signed-distance field so it does not depend on
+the polygonisation grid. Short of that, the geometry report carries `surfaceProjectionWithheld` instead and the
+runtime renders the bare form.
+
+The reason is specific. The palmar plate has the item's own thumb painted across its palm, so a four-digit
+model wearing that plate renders as five digits and every form defect behind the texture becomes invisible. A
+thumb fused into the palm mass survived a dozen textured renders here before an untextured one caught it.
+
+**Current state: the gate fails.** Measured on both the real Slingshot plates and the fixture, the form has
+four separate digits, not five. Below the knuckle line the plate's outline is a single connected run, so the
+palm/thumb boundary is an occlusion edge that no silhouette carries — mirroring the palm's taper from the far
+side to infer it predicted a palm edge at 1.106 of the silhouette's own width, because near the knuckles that
+far edge belongs to the pinky, and on the fixture the implied thumb excess came out at exactly zero. Four
+constructions were tried; each either contradicted the measured outline, pushing the silhouette aspect from a
+measured 0.618 out to 0.85, or produced lobes thinner than a grid cell that left the surface open. The thumb
+is present in the outline and in the texture, and it is not yet present as a digit.
+
 ## Review gates
 
 The review publishes nine independent measurements, each named for what it measures:

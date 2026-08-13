@@ -1020,7 +1020,10 @@ function projectSdfAtlasUv(
       // image, so a u past 1.0 in the dorsal half would sample the palmar half instead of the dorsal
       // plate's dilated edge.
       let u = Math.min(1, Math.max(0, (x - lowX) / spanX));
-      const v = Math.min(1, Math.max(0, (y - lowY) / spanY));
+      // v runs DOWNWARD from the frame's top: the atlas is uploaded with `flipY = false`, so v=0 is the
+      // image's first row, and that row is the plate's top -- the fingertips. Measured the other way the
+      // model wore its cuff on its fingertips.
+      const v = Math.min(1, Math.max(0, (highY - y) / spanY));
       if (flipU) u = 1 - u;
       uv.push(dorsal ? u * 0.5 : 0.5 + u * 0.5, v);
     }
@@ -2387,7 +2390,9 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 "    positions.push(hand === 'right' ? -x + offset : x + offset, y, isFront ? half : -half);",
                 "    const u = (col + 0.5) / size;",
                 "    // Each side lands on the atlas half holding the view that saw it.",
-                "    uvs.push((isFront || rim) ? u * 0.5 : 0.5 + u * 0.5, 1 - (row + 0.5) / size);",
+                "    // v downward from the top of the grid: `flipY = false` makes v=0 the image's first row,",
+                "    // which is the plate's fingertip end. Upward put the shell's fingertips on the cuff.",
+                "    uvs.push((isFront || rim) ? u * 0.5 : 0.5 + u * 0.5, (row + 0.5) / size);",
                 "    return id;",
                 "  };",
                 "  const outwardFront = hand === 'right';",

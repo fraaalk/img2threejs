@@ -443,6 +443,27 @@ defect is a capture defect. Full gate table, the two permitted scene threshold s
 armature splits what the plate observed from what a prior supplies, and the recorded known defects:
 `docs/CS2_GLOVE_WORKFLOW.md`.
 
+### Do not project the reference onto a form that has not passed
+
+Texture hides form. A photographed plate carries the item's own structure, so projecting it onto a wrong
+shape paints the missing structure back on and the render looks right while the geometry is not: a
+four-digit glove wearing a palmar plate reads as five digits, because the plate has the item's own thumb
+painted across its palm. That is not a hypothetical — it survived a dozen textured renders in this repo
+before an untextured one caught it.
+
+So the projection is **withheld until the form measures up**, and the gate is in the builder rather than in
+a reviewer's memory. For `wearable-v1.0` that gate is the digit count: five separate solids crossed by a
+horizontal line through the digit band, measured from the signed-distance field so the answer does not
+depend on the polygonisation grid. Fewer than five and `surfaceAtlas` is not attached at all; the geometry
+report carries `surfaceProjectionWithheld` with the measured count, and the runtime renders the bare form.
+
+Two rules follow for any reconstruction, wearable or not:
+
+- **Judge form on an untextured render.** Shade it from the surface normal and look at the silhouette,
+  the part count, and the cross-sections. A textured render is for judging the *texture*.
+- **Never let a resemblance impression stand in for a form measurement.** Count the parts the model
+  actually has, from the geometry, and compare that number against what the object has.
+
 Two CS2 plates are both front-axis views, so they carry **no depth information at all** and one pixel
 in five of the render is surface neither plate photographed — measured 19.2% of the dorsal view's
 visible area. The depth axis is an anthropometric prior, declared as `derivation.axes.z.state:

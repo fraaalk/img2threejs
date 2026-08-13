@@ -153,7 +153,10 @@ def build_hand_shell(
             # each side lands on the half of the atlas holding the view that saw it.
             u = (col + 0.5) / size
             half_u = u * 0.5 if (front or rim) else 0.5 + u * 0.5
-            uv0.append([round(half_u, 6), round(1.0 - (row + 0.5) / size, 6)])
+            # v runs downward from the top of the grid: the atlas is uploaded with `flipY = false`, so v=0 is
+            # the image's first row, which is the plate's fingertip end. Running it upward put the shell's
+            # fingertips on the atlas's last row -- the cuff.
+            uv0.append([round(half_u, 6), round((row + 0.5) / size, 6)])
         return lookup[key]
 
     indices: list[list[int]] = []

@@ -77,7 +77,9 @@ export function buildShellAttributes(descriptor) {
     const half = halfThickness(row, col, isFront);
     positions.push(hand === 'right' ? -x + offset : x + offset, y, isFront ? half : -half);
     const u = (col + 0.5) / size;
-    uvs.push((isFront || rim) ? u * 0.5 : 0.5 + u * 0.5, 1 - (row + 0.5) / size);
+    // v downward from the top of the grid: `flipY = false` makes v=0 the image's first row, the plate's
+    // fingertip end. Upward put the shell's fingertips on the atlas's cuff.
+    uvs.push((isFront || rim) ? u * 0.5 : 0.5 + u * 0.5, (row + 0.5) / size);
     return id;
   };
   const outwardFront = hand === 'right';

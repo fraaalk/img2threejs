@@ -117,6 +117,28 @@ class GloveArmatureParityTests(unittest.TestCase):
         self.assertGreater(facing, 0, "no triangle faces either plate")
         self.assertEqual(flat_facing, 0, f"{flat_facing} of {facing} plate-facing triangles have zero uv area")
 
+    def test_the_texture_is_not_upside_down(self):
+        """The model's fingertips must wear the plate's fingertips.
+
+        The atlas is uploaded with `flipY = false`, so texture v=0 is the image's FIRST row, and the atlas's
+        first row is the plate's first row -- the fingertips, since the bake crops the plate to its own
+        silhouette and preserves orientation. So v has to run downward from the frame's top.
+
+        It ran the other way for the whole life of this track, in the inflation route before the armature and
+        in the armature after it: the model's fingertips took v=1 and therefore the atlas's LAST row, so every
+        glove wore its cuff on its fingertips. A dozen renders went by without it being spotted, because a
+        glove is nearly symmetric in its colour blocking end to end -- the aggregate luma of the atlas's top
+        and bottom eighths differs by 4 out of 255. It was settled by comparing the atlas's rows against the
+        plate's crop row for row.
+        """
+        heights = [position[1] for position in self.mesh["positions"]]
+        top, bottom = max(heights), min(heights)
+        near_top = [uv[1] for position, uv in zip(self.mesh["positions"], self.mesh["uv0"]) if position[1] > top - 0.02]
+        near_bottom = [uv[1] for position, uv in zip(self.mesh["positions"], self.mesh["uv0"]) if position[1] < bottom + 0.02]
+        self.assertTrue(near_top and near_bottom)
+        self.assertLess(max(near_top), 0.1, "the model's fingertips are sampling the bottom of the plate")
+        self.assertGreater(min(near_bottom), 0.9, "the model's cuff is sampling the top of the plate")
+
     def test_no_triangle_straddles_the_atlas_seam(self):
         for triangle in self.mesh["indices"]:
             us = [self.mesh["uv0"][corner][0] for corner in triangle]

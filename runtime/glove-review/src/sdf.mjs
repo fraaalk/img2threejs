@@ -308,7 +308,9 @@ export function buildSdfAtlasAttributes(THREE, descriptor) {
       // image, so a u past 1.0 in the dorsal half would sample the palmar half instead of the dorsal
       // plate's dilated edge.
       let u = Math.min(1, Math.max(0, (x - lowX) / spanX));
-      const v = Math.min(1, Math.max(0, (y - lowY) / spanY));
+      // v downward from the frame's top: `flipY = false` makes v=0 the image's first row, which is the
+      // plate's top. Measured upward, the model wore its cuff on its fingertips.
+      const v = Math.min(1, Math.max(0, (highY - y) / spanY));
       if (flipU) u = 1 - u;
       outUvs.push(dorsal ? u * 0.5 : 0.5 + u * 0.5, v);
     }

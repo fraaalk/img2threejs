@@ -29,6 +29,60 @@ DERIVATION_TIER = "sdf-armature-v1"
 ATLAS_PROJECTION = "atlas-front-back"
 
 
+REQUIRED_DIGITS = 5
+# Heights swept across the digit band when counting digits, and how many consecutive ones must agree. One
+# height can catch a coincidence; a contiguous stretch cannot.
+DIGIT_SWEEP_SAMPLES = 21
+MIN_DIGIT_SWEEP = 6
+
+
+def measure_digit_separation(descriptor: dict[str, Any]) -> dict[str, Any]:
+    """Count how many digits the FORM has, by asking the field rather than looking at a render.
+
+    A glove has five. Counting them from a textured render is worse than useless: the palmar plate has the
+    item's own thumb painted across its palm, so a four-digit model wearing that plate reads as five. Every
+    form judgement in this track was made on textured renders until that was caught, and a thumb fused into
+    the palm went unnoticed through a dozen of them.
+
+    The count is the longest contiguous stretch of sampled heights that all cross the same number of separate
+    solids. Sampling the field makes it resolution-independent -- an inter-digit groove and one grid cell are
+    the same size, so counting clusters of mesh vertices measures the grid instead of the hand.
+    """
+    sample = sample_sdf(descriptor)
+    low = descriptor["bounds"]["min"]
+    high = descriptor["bounds"]["max"]
+    counts: list[int] = []
+    for step in range(DIGIT_SWEEP_SAMPLES):
+        y = low[1] + (high[1] - low[1]) * (0.55 + 0.018 * step)
+        inside = [
+            sample((low[0] + (high[0] - low[0]) * index / 799.0, y, 0.0)) < 0.0
+            for index in range(800)
+        ]
+        runs = 0
+        previous = False
+        for value in inside:
+            if value and not previous:
+                runs += 1
+            previous = value
+        counts.append(runs)
+    best = 0
+    longest = 0
+    for count in sorted(set(counts), reverse=True):
+        current = 0
+        for value in counts:
+            current = current + 1 if value == count else 0
+            if current > longest:
+                longest, best = current, count
+    return {
+        "status": "measured",
+        "value": float(best),
+        "required": float(REQUIRED_DIGITS),
+        "sweepAgreement": longest,
+        "countsByHeight": counts,
+        "method": "separate solids crossed by a horizontal line through the digit band, from the field",
+    }
+
+
 def _measure_minimum_thickness(descriptor: dict[str, Any]) -> float:
     """The smallest cross-section any part of the solid is built with.
 
@@ -186,6 +240,20 @@ def build_glove_armature_geometry(
     )
     thin = min(mesh["measurements"]["minimumThickness"] for mesh in meshes)
     depth_observed = depth_source is not None
+    # THE FORM GATE. A glove has five digits, and until the form has five the plates are not projected onto
+    # it at all.
+    #
+    # Not a style rule -- a correctness one. The palmar plate has the item's own thumb painted across its
+    # palm, so a four-digit model wearing that plate renders as five and every form defect behind the texture
+    # becomes invisible. That is not hypothetical: a thumb fused into the palm survived a dozen textured
+    # renders here, and it took an untextured one to see. Withholding the projection makes the deception
+    # structurally impossible rather than something a reviewer has to remember to look past.
+    separation = {hand: measure_digit_separation(descriptor["sdf"]) for hand, descriptor in descriptors.items()}
+    form_ready = all(
+        entry["value"] >= REQUIRED_DIGITS and entry["sweepAgreement"] >= MIN_DIGIT_SWEEP
+        for entry in separation.values()
+    )
+    project = atlas_output is not None and form_ready
     return {
         "version": SHELL_VERSION,
         "evidenceTier": "evidence-backed" if depth_observed else "diagnostic",
@@ -227,7 +295,17 @@ def build_glove_armature_geometry(
                 }
             ],
         },
-        **({"surfaceAtlas": bake_shell_atlas(reference, palmar_reference, atlas_output)} if atlas_output is not None else {}),
+        **({"surfaceAtlas": bake_shell_atlas(reference, palmar_reference, atlas_output)} if project else {}),
+        "surfaceProjectionWithheld": None if project or atlas_output is None else {
+            "reason": "form-gate:digit-count",
+            "measured": {hand: entry["value"] for hand, entry in separation.items()},
+            "required": float(REQUIRED_DIGITS),
+            "note": (
+                "the plates are not projected until the form has five separate digits, because the palmar "
+                "plate paints the item's own thumb across its palm and a four-digit model wearing it reads "
+                "as five"
+            ),
+        },
         # One descriptor per hand, because each hand is its own implicit solid placed in its own bounds.
         "geometryDescriptor": {"armature": {"left": descriptors["left"], "right": descriptors["right"]}},
         "derivation": {
@@ -248,12 +326,25 @@ def build_glove_armature_geometry(
             "digit placement is fitted to the measured finger band, not detected: the reference shows the digits touching, so the peaks that would separate them are not observable",
             "the surface is extracted on a finite grid, so it is faceted at texel scale rather than smooth",
             "the atlas spans the polygonised bounds including the thumb's reach, so the plate is aligned to a few percent rather than exactly",
-        ] + ([] if depth_observed else ["every depth is an anthropometric ratio; two front-axis plates carry no depth at all"]),
+        ] + ([] if depth_observed else ["every depth is an anthropometric ratio; two front-axis plates carry no depth at all"])
+          + ([] if form_ready else [
+              "the form has fewer than five separate digits, so the plates are NOT projected onto it: the "
+              "thumb is fused into the palm mass. Below the knuckle line the plate's outline is a single "
+              "connected run, so the palm/thumb boundary is an occlusion edge no silhouette carries, and "
+              "four attempts to carve one either contradicted the measured outline -- pushing the silhouette "
+              "aspect from 0.618 to 0.85 -- or produced slivers the polygonisation grid could not close."
+          ]),
         "integrity": {
             "finiteGeometry": {"status": "measured", "value": float(all(all(math.isfinite(value) for vertex in mesh["vertices"] for value in vertex) for mesh in meshes))},
             "nonDegenerateExtrusion": {"status": "measured", "value": float(thin >= MIN_THICKNESS)},
             "productionManifold": {"status": "measured", "value": float(manifold)},
             "seamBoundaryCorrespondence": {"status": "measured", "value": 1.0, "reason": "one implicit solid per hand has no panel seams to correspond"},
             "triangleBudget": {"status": "measured", "value": sum(mesh["measurements"]["triangleCount"] for mesh in meshes), "policy": "pre-decimation"},
+            "digitSeparation": {
+                "status": "measured",
+                "value": float(min(entry["value"] for entry in separation.values())),
+                "required": float(REQUIRED_DIGITS),
+                "perHand": separation,
+            },
         },
     }
