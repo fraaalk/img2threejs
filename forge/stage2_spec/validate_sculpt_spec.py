@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chirality import CHARACTER_LEFT_SIGN, check_pair, find_pairs  # noqa: E402
 from feature_acceptance_policy import feature_gate_failures, feature_review_policy
 from hair_profile import REJECTED_HAIR_PRIMITIVES, validate_hair_profile
+from material_physics import check_material_physics, check_open_boundary_sides
 from sdf_primitives import validate_sdf_descriptor
 from subdivision import (
     ATTACHMENT_CYLINDER_SUBDIVISION_SOURCE_FACES,
@@ -873,6 +874,13 @@ def validate_materials(spec: dict[str, Any], errors: list[str], warnings: list[s
         if material_id in material_ids:
             errors.append(f"duplicate material id {material_id!r}")
         material_ids.add(material_id)
+        # What three.js will ACTUALLY do with these numbers -- gated features, clamps, values folded
+        # into one uniform, and the base-darkening sheen applies to itself. A value the engine ignores
+        # is worse than a missing one: it reads as authored evidence and renders as nothing.
+        # Derivation with every file:line: grimoire/build/threejs_skin_and_cloth_materials.md
+        physics_errors, physics_warnings = check_material_physics(material_id, material)
+        errors.extend(physics_errors)
+        warnings.extend(physics_warnings)
         color = material.get("baseColor", material.get("color"))
         if color is not None and not (isinstance(color, str) and color.startswith("#") and len(color) in {4, 7}):
             errors.append(f"material {material_id!r} baseColor/color should be #RGB or #RRGGBB")
@@ -1479,6 +1487,10 @@ def validate_components(
             errors.append(f"component {component_id!r} references unknown material {material!r}")
         validate_geometry_descriptor(component_id, component.get("geometryDescriptor"), errors)
         validate_stand_proud(component_id, component, errors, warnings, proud_refs)
+        # three's Material.side defaults to FrontSide, which culls backfaces, so a garment opening
+        # renders as a HOLE rather than as the inside of the sleeve -- indistinguishable at a glance
+        # from a garment that is simply too short, and the two want opposite fixes.
+        errors.extend(check_open_boundary_sides(component_id, component))
         # The decision left open in docs/UPGRADE_PLAN.md since v1.2 -- "hair cards vs
         # tube-along-curve per lock" -- closed here by what this pipeline can actually emit.
         if str(component.get("role") or "").lower() == "hair":
