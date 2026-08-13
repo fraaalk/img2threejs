@@ -27,15 +27,9 @@ from forge._shared.sdf_mesh import _apply_quaternion, _quaternion_from_euler_xyz
 # Anthropometric ratios, all relative to palm width. Priors, not measurements.
 PALM_DEPTH_RATIO = 0.30
 THUMB_RADIUS_RATIO = 0.135
-# A thumb is opposed: it leaves the plane of the fingers. This is the single most visible thing an
-# inflated silhouette cannot do. Unsourced prior -- the thumb-kinematics papers give joint-centre offsets
-# relative to the metacarpal, not an angle away from the metacarpal plane.
-THUMB_OUT_OF_PLANE_DEGREES = 62.0
-# Thumb abduction at rest. The one cited anchor available: Curran et al. report 21 degrees (SD 7) of
-# abduction in a cylinder grip and 9 (SD 4) in a tip pinch, and a worn glove sits nearer the former.
-# The out-of-plane angle above has NO source -- the thumb-kinematics papers give joint-centre offsets,
-# not an angle away from the metacarpal plane -- so it remains an unsourced prior and is declared as one.
-THUMB_SPLAY_DEGREES = 21.0
+# Where the thumb's root sits when the outline could not measure it, as fractions of the height from the
+# top. Only reached for a silhouette with no thumb-side reach at all.
+THUMB_ROOT_FALLBACK = (0.33, 0.61)
 # Ordered from the thumb outward: the index finger is the one beside the thumb.
 DIGITS = ("index", "middle", "ring", "pinky")
 # Digit length as a fraction of the middle finger. Measured anthropometry, not invented: Colombian and
@@ -68,9 +62,28 @@ THUMB_WEB_OF_RADIUS = 0.6
 SMOOTH_UNION_RADIUS_OF_FINGER = 0.16
 # Slices thinner than this are the outline's closing edge, not a cross-section of the hand.
 MIN_PROFILE_SLICE_WIDTH = 0.15
-# Each slice's half-height as a multiple of the slice spacing. Above 1.0 consecutive slices overlap, so
-# the union is a continuous sweep instead of a stack of beads.
-PROFILE_SLICE_OVERLAP = 1.15
+# How deeply consecutive palm slices must overlap, in POLYGONISATION CELLS -- the same unit, and for the same
+# reason, as `DIGIT_GROOVE_CELLS`. Two solids can be a real overlap or a gap wider than a cell; an overlap
+# THINNER than a cell is neither, and the extractor welds the two surfaces into a non-manifold pinch.
+#
+# This was a dimensionless 1.15 multiple of the slice spacing, which sounds safe and was not: solved out, the
+# overlap it produces is `H * 0.15 / (slices - 1 + 1.15)` for a palm `H` tall, which on the real Slingshot
+# plate is 0.0028 against a cell of 0.0179 -- six times too thin, for every slice junction on the stack. The
+# sweep was manifold only by where the grid's samples happened to land, which is why every unrelated change to
+# the thumb flipped the mesh's non-manifold count: the thumb's reach sets the bounds, the bounds set the cell,
+# and the cell decided whether the palm's own seams welded that time.
+#
+# Two cells rather than one, and the second is not padding. At one cell both plates sit on the threshold and
+# fall off it unpredictably: the real Slingshot plate welded one edge between `palm-slice-21` and `-22` at
+# 1.0 cells and was clean at 1.5, and the fixture was the other way round. Two is the smallest whole number
+# that is manifold on both, and it is chosen against those two plates only -- a third plate could need more.
+PROFILE_SLICE_OVERLAP_CELLS = 2.0
+# The THUMB's radius, in cells. It is singled out because it is the one digit whose separation is not already
+# solved against the grid: the four fingers grow out of the palm's top, where the palm ends, and are held apart
+# from each other by `DIGIT_GROOVE_CELLS`, so their diameter shrinks with the cell. The thumb grows out of the
+# palm's SIDE and has to stand clear of the palm's own surface, and its radius is an anthropometric fraction of
+# palm width that does not shrink with the grid at all.
+MIN_THUMB_RADIUS_CELLS = 2.0
 DEFAULT_RESOLUTION = 64
 
 
@@ -118,7 +131,17 @@ def build_glove_sdf_descriptor(
     if not 0.05 < finger_band < 0.9:
         raise ValueError(f"fingerBandFraction {finger_band} is outside the range a hand can occupy")
     thumb_side = measured.get("thumbSide", "right")
-    mirror = -1.0 if hand == "right" else 1.0
+    # WHICH hand the measurement came from, rather than assuming it was the left one. A pair plate holds two
+    # gloves and the silhouette measures the largest component, which on the real Slingshot plates is the
+    # RIGHT glove; every offset measured from it was then applied to the left hand unmirrored. Rendered
+    # untextured that put both thumbs on the outside of the pair, where the plate plainly shows them facing
+    # each other.
+    #
+    # Handedness is not a guess here: seen from the back of the hand, the thumb lies on the side away from
+    # the body, so a dorsal view whose thumb reaches toward image-left is a right hand. The track's target
+    # view is the dorsal plate, which is what makes this readable at all -- a palmar view would invert it.
+    observed_hand = "right" if thumb_side == "left" else "left"
+    mirror = 1.0 if hand == observed_hand else -1.0
     # The outline is normalised to unit height, so palm width follows from the measured aspect.
     palm_width = aspect
     palm_depth = PALM_DEPTH_RATIO * palm_width
@@ -189,7 +212,21 @@ def build_glove_sdf_descriptor(
     # fingers -- the plate says the digits are 40.8% of the height and the render gave 29.5%.
     # Solving "the covered span is exactly palm_top down to -0.5" and "each slice is OVERLAP times half
     # the centre spacing" together gives the half-height directly, with no knob left over.
-    half_height = (palm_top + 0.5) / (2.0 * (len(profile) - 1) / PROFILE_SLICE_OVERLAP + 2.0)
+    #
+    # The overlap multiple is SOLVED for rather than assigned, so the constraint above holds at whatever slice
+    # count and cell size this plate and grid produce. Writing the covered span as `H`, the gaps between slice
+    # centres as `k = slices - 1`, and the multiple as `O`, the two equations give
+    # `overlap = H * (O - 1) / (k + O)`; setting that equal to the required cells and solving for `O` gives the
+    # line below. `H > required` is what makes it positive, and a palm shorter than one cell has no sweep.
+    palm_span = palm_top + 0.5
+    required = PROFILE_SLICE_OVERLAP_CELLS * cell
+    if palm_span <= required:
+        raise ValueError(
+            f"the palm is {palm_span:.4f} tall, under the {required:.4f} that {PROFILE_SLICE_OVERLAP_CELLS} "
+            f"polygonisation cells need; at resolution {resolution} this grid cannot carry a swept palm"
+        )
+    overlap = (palm_span + required * (len(profile) - 1)) / (palm_span - required)
+    half_height = palm_span / (2.0 * (len(profile) - 1) / overlap + 2.0)
     top = palm_top - half_height
     bottom = -0.5 + half_height
     for index, (width, centre) in enumerate(profile):
@@ -227,33 +264,55 @@ def build_glove_sdf_descriptor(
             rotation=[math.radians(-9.0), 0.0, 0.0],
         ))
     thumb_radius = THUMB_RADIUS_RATIO * palm_width
-    # The capsule's caps are part of its reach, so the cylinder is the span less one diameter.
-    thumb_length = max(0.0, (palm_top + 0.5) - 2.0 * thumb_radius)
-    thumb_rotation = [
-        0.0,
-        math.radians(mirror * thumb_direction * THUMB_OUT_OF_PLANE_DEGREES),
-        math.radians(mirror * thumb_direction * THUMB_SPLAY_DEGREES),
-    ]
-    # A capsule's axis is its local Y, so its world reach along x is how far that axis tilts into x.
-    thumb_axis = _apply_quaternion((0.0, 1.0, 0.0), _quaternion_from_euler_xyz(thumb_rotation))
-    thumb_x_reach = abs(thumb_axis[0]) * thumb_length / 2.0 + thumb_radius
+    # The thumb runs ALONGSIDE the palm on the thumb side, rotated onto the palmar side of it -- which is why
+    # the dorsal plate barely shows it and the palmar plate shows a whole digit. Both readings have to hold at
+    # once, and only this pose does: standing in the digit row it would need width the measured span does not
+    # have, and folded across the palm it reads as a lump rather than a digit, which is what the first version
+    # here rendered.
+    #
+    # So the pose is a segment, and the outline supplies most of it. The thumb's own lobe -- the stretch where
+    # the hand reaches past the four digits' envelope -- is 0.50 of the hand's height on the real Slingshot
+    # plate, and the segment spans exactly that, at the palm's thumb-side edge so the thumb's outer surface
+    # lands on the outline where the plate puts it. The one prior left is the depth: the axis leaves the palm's
+    # own surface at the wrist, which is the web, and stands a radius clear of it at the tip. Angles are then
+    # derived from the segment rather than chosen -- a pair of Euler priors cannot express "clear of the palm"
+    # at all, since where the palmar surface sits depends on the palm's depth.
+    root = measured.get("thumbRootFraction") or list(THUMB_ROOT_FALLBACK)
+    thumb_x = mirror * thumb_direction * (palm_width / 2.0 - thumb_radius)
+    # The TIP height comes from the lobe, the BASE from the wrist, and the asymmetry is not a shortcut. The
+    # lobe is where the outline reaches past the four digits' envelope, and that test fails at both ends for
+    # opposite reasons: near the knuckles the hand is wider than the tapered fingers so the lobe starts too
+    # high, and below mid-palm the hand narrows back inside the envelope while the thumb is still there, so
+    # the lobe stops too low. The tip survives the first error because the plate can be read directly -- the
+    # thumb's tip sits at 0.22-0.27 of the height, which is what the lobe's top says. The base cannot, so it
+    # takes the anatomical anchor instead: a thumb's metacarpal starts at the wrist. Measured from the lobe's
+    # bottom the base sat at 0.17 above the frame's middle and the thumb rendered as a 2.4:1 pill stuck on the
+    # palm; from the wrist it spans 3.9 diameters, which is a digit.
+    # The base sits at the palm's MID-DEPTH, embedded, not tangent to its palmar surface. That is the web on a
+    # real hand, and it is also the only numerically safe end: tangency is a near-touch, the gap it leaves runs
+    # under one grid cell, and the extractor welds the two surfaces there. Measured on the fixture, a tangent
+    # base put two non-manifold edges between `thumb-digit` and `palm-slice-10` at the wrist.
+    proximal = (thumb_x, -0.5 + thumb_radius, 0.0)
+    distal = (thumb_x, 0.5 - min(root), -(palm_depth / 2.0 + thumb_radius))
+    span_vector = [distal[axis] - proximal[axis] for axis in range(3)]
+    reach = math.sqrt(sum(value * value for value in span_vector))
+    if reach <= 2.0 * thumb_radius:
+        raise ValueError(
+            f"the measured thumb root spans {reach:.4f} of the frame, which a thumb {2 * thumb_radius:.4f} "
+            "across cannot be posed along; the silhouette did not resolve a thumb"
+        )
+    axis = [value / reach for value in span_vector]
+    # A capsule's own axis is its local +Y, so the rotation is whichever one carries +Y onto that segment.
+    # With the x rotation left at zero, `setFromEuler` XYZ sends +Y to (-sin z * cos y, cos z, sin z * sin y),
+    # which inverts in closed form -- no search, and the emitted Eulers stay the same three numbers the
+    # runtime already reads.
+    thumb_rotation = [0.0, math.atan2(axis[2], -axis[0]), math.acos(max(-1.0, min(1.0, axis[1])))]
     primitives.append(_capsule(
         "thumb-digit",
         radius=thumb_radius,
-        height=thumb_length,
-        # Placed so the thumb's far end reaches the knuckle line, which is where a relaxed thumb's tip
-        # sits against the base of the index finger. A fraction of palm height instead left it low
-        # against a palm that had already tapered away from it, and the two came apart into separate
-        # solids -- a thumb floating beside the hand.
-        # The thumb's outer surface lands exactly on the silhouette's widest extent, because on the
-        # reference plate the thumb IS what makes the widest row. Its reach has to be computed through the
-        # rotation, not assumed: a capsule rotated out of the plane swings its far cap sideways, so
-        # `centre + radius` understates it. Anchored that way the thumb still overran the uv frame by 8.7%
-        # of its width, which showed as a flat clamped band down the inner edge of each glove -- found by
-        # painting uv-clamped triangles into a debug raster, where the clamped region was exactly the thumb.
-        translation=[mirror * thumb_direction * (aspect / 2.0 - thumb_x_reach),
-                     round((palm_top - 0.5) / 2.0, 6),
-                     0.0],
+        # The caps are part of the reach, so the cylinder is the segment less one diameter.
+        height=reach - 2.0 * thumb_radius,
+        translation=[(proximal[axis_index] + distal[axis_index]) / 2.0 for axis_index in range(3)],
         rotation=thumb_rotation,
     ))
     # No rescale here, deliberately. An earlier version fitted the assembled parts into the frame by
@@ -278,7 +337,6 @@ def build_glove_sdf_descriptor(
     # already being computed from the pre-scale finger radius, which made it larger than intended
     # relative to the digits it was blending.
     fillet = min(item["radius"] for item in primitives if item["type"] == "capsule") * SMOOTH_UNION_RADIUS_OF_FINGER
-    sweep_radius = min(item["radii"][1] for item in primitives if item["type"] == "ellipsoid")
     operations: list[dict[str, Any]] = []
 
     def combine(name: str, parts: list[str], kind: str, radius: float | None = None) -> str:
@@ -293,9 +351,13 @@ def build_glove_sdf_descriptor(
         return previous
 
     slice_ids = [item["id"] for item in primitives if item["id"].startswith("palm-slice")]
-    # The slices overlap, so they are swept together smoothly: a hard union of overlapping ellipsoids
-    # leaves a visible bulge at every junction.
-    palm = combine("palm-sweep", slice_ids, "smooth-union", sweep_radius) if len(slice_ids) > 1 else slice_ids[0]
+    # A HARD union along the sweep, now that consecutive slices are guaranteed to overlap by a full cell.
+    # Smooth-union was here to hide the junctions of barely-overlapping beads, and once the overlap became
+    # real it turned into the defect: `smin` ADDS material near a junction, and this is a chain of 31 of them,
+    # so the additions accumulate outward. Measured on the real plate the palm's widest slice is 0.601 across
+    # and the extracted mesh spanned 0.703 -- a silhouette 14% wider than the plate's own, from the blend
+    # alone. With a cell of real overlap the crease a hard union leaves is finer than the grid can express.
+    palm = combine("palm-sweep", slice_ids, "union") if len(slice_ids) > 1 else slice_ids[0]
     digits = combine("digit-row", [f"{digit}-digit" for digit in DIGITS], "union")
     hand = combine("knuckles", [palm, digits], "smooth-union", fillet)
     # The thumb web is a broad transition on a real hand, and it has to be broad here for a second
@@ -313,6 +375,18 @@ def build_glove_sdf_descriptor(
     # fixed position would break the moment the palm stopped being one primitive, which it has.
     margin = min(item["radius"] for item in primitives if item["type"] == "capsule") * BOUNDS_MARGIN_RADII
     extents = _content_extents(primitives)
+    # Refuse a grid too coarse to carry the thumb, rather than emitting a welded mesh and leaving stage 4 to
+    # discover it. Measured across resolutions on the fixture: at 24 the thumb's radius is 1.76 cells and the
+    # extraction welds three edges -- one at the thumb's web and one at each of the index and pinky knuckles --
+    # while 32, 48 and 64 are all clean, with the thumb at 2.32 cells and up. Guarding the slimmest capsule
+    # instead was wrong and the numbers said so: at 32 that is a FINGER at 1.0 cells, on a mesh with no welds
+    # at all, because the fingers' own separation is already solved in cells.
+    if thumb_radius < MIN_THUMB_RADIUS_CELLS * cell:
+        raise ValueError(
+            f"resolution {resolution} gives a cell of {cell:.4f} and a thumb radius of {thumb_radius:.4f}, "
+            f"under the {MIN_THUMB_RADIUS_CELLS} cells the extractor needs to keep the thumb clear of the "
+            "palm it grows out of; raise the resolution"
+        )
     return {
         "sdf": {
             "primitives": primitives,
@@ -330,6 +404,8 @@ def build_glove_sdf_descriptor(
                     "fingerBandFraction": finger_band,
                     "fingerSpanFraction": measured.get("fingerSpanFraction"),
                     "thumbSide": thumb_side,
+                    "thumbRootFraction": measured.get("thumbRootFraction"),
+                    "measuredHand": observed_hand,
                 },
                 "inferred": {
                     "palmDepthRatio": PALM_DEPTH_RATIO,
@@ -337,7 +413,9 @@ def build_glove_sdf_descriptor(
                     if digit_row_width > 0.0
                     else f"ratio prior {FINGER_RADIUS_RATIO}; the silhouette supplied no digit-row width",
                     "digitPlacement": "evenly spaced across the measured digit-row width; the skyline of the real plate yields two valleys, not four, so per-digit centres would be fitting noise",
-                    "thumbOutOfPlaneDegrees": THUMB_OUT_OF_PLANE_DEGREES,
+                    "thumbPose": "alongside the palm's thumb-side edge, rotated onto its palmar side; the lobe "
+                    f"it spans is measured{'' if measured.get('thumbRootFraction') else f' (absent here, prior {THUMB_ROOT_FALLBACK})'} "
+                    "and the depth is the palm-depth prior",
                     "depth": depth_source or "anthropometric ratios; two front-axis plates carry no depth",
                 },
             },

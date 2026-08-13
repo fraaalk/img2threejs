@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `forge/tools/serve_form_review.py` serves the glove form in a browser, untextured, built by the runtime's
+  own polygonizer so what is reviewed is what ships. Every form defect in this track was found by a person
+  looking at the shape and missed by the numbers, and the still renders that caught two of them took a code
+  change each to re-aim.
+
+### Fixed
+- The glove's **thumb is a fifth digit** now, and the form gate says so from the geometry. Three things were
+  wrong at once. The thumb was posed as a fifth finger at the outline's edge where the palm's own sweep
+  swallowed it, so the hand had four digits and a lobe. The pair's handedness came from the largest
+  silhouette component without asking *which* hand that was — on the real plates it is the right glove — so
+  both thumbs pointed outward where the plate shows them facing each other. And the palm's slice stack
+  overlapped by 0.0028 against a grid cell of 0.0179, six times too thin, so the sweep was manifold only by
+  where the samples happened to land; that is why unrelated changes to the thumb kept flipping the mesh's
+  non-manifold count. The thumb now runs alongside the palm rotated onto its palmar side, handedness is read
+  off the thumb side through anatomy, and both the slice overlap and the thumb's own radius are constrained in
+  grid cells. Measured on the real Slingshot plates and the fixture: five digits clear, no boundary or
+  non-manifold edges, silhouette aspect within 0.6% of the plate's.
+- The form gate counts a digit by whether its own surface stands outside the rest of the hand, not by how many
+  solids a line through the digit band crosses. The line test can only see digits standing side by side, and
+  this glove's thumb is tucked against the palm — it would have failed a hand that was correct.
+- `build_glove_sdf_descriptor` refuses a resolution too coarse to carry the thumb rather than emitting a
+  welded mesh. At resolution 24 the thumb is 1.76 cells across and the extraction welds three edges.
+
 ### Changed
 - **BREAKING** — the SDF extractor is naive surface nets, not binary voxel occupancy. Every vertex is now
   the interpolated zero crossing of one cell's edges instead of an integer grid corner, which changes the

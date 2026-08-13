@@ -34,6 +34,9 @@ DESCRIPTOR_KIND = "silhouetteInflation"
 # descriptor can actually use is decided by the builder, because that depends on the polygonisation grid.
 # Sampled finely here so the builder has something to thin out rather than something to interpolate.
 PROFILE_SLICES = 48
+# How far past the digits' envelope the outline has to reach before that row counts as the thumb's root
+# rather than a wobble in the silhouette's edge.
+THUMB_REACH_FRACTION = 0.02
 
 
 def measure_silhouette(reference: Path, grid: int = DEFAULT_GRID) -> tuple[list[list[bool]], dict[str, Any]]:
@@ -91,8 +94,6 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
         for row in range(grid)
     ]
     span_x, span_y = max(1, x1 - x0), max(1, y1 - y0)
-    below = [index for index in cells if index // width > y0 + span_y * 0.45]
-    left = sum(1 for index in below if index % width < (x0 + x1) / 2)
     # Row widths locate the knuckle line: the digits occupy everything above the first row that
     # reaches near-maximum width. It is the one anatomical landmark a pressed-together silhouette
     # still gives up, since it needs no per-digit separation.
@@ -135,9 +136,30 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
         width = (bounds[1] - bounds[0] + 1) / span_x
         centre = ((bounds[0] + bounds[1]) / 2.0 - x0) / span_x - 0.5
         profile.append((round(width, 6), round(centre, 6)))
+    # Which side the thumb is on, measured from the OUTLINE rather than from pixel mass. The mass test
+    # this replaces -- more foreground left of the bbox midline than right, below 0.45 of the height --
+    # is dominated by the palm, and a palm is roughly symmetric: on the real Slingshot plate it answered
+    # "right" for a hand whose thumb is on the left, so the thumb was built against the pinky.
+    #
+    # The outline gives one unambiguous signal instead. The four digits define an envelope; the thumb is
+    # the side where the hand reaches PAST that envelope. On the same plate that reads 0.0179 of the frame
+    # on the left against 0.0000 on the right.
+    reach = {
+        "left": [(y, digit_bounds[0] - low) for y, (low, _high) in rows.items()],
+        "right": [(y, high - digit_bounds[1]) for y, (_low, high) in rows.items()],
+    }
+    areas = {side: sum(max(0, value) for _y, value in entries) for side, entries in reach.items()}
+    thumb_side = "left" if areas["left"] > areas["right"] else "right"
+    # Where along the height that reach is real rather than a wobble in the outline. This is the thumb's
+    # root: a thumb tucked into the palm is hidden behind the palm for its whole length except where it
+    # leaves the hand, so this band is the only part of it a front-axis plate observes at all.
+    band = sorted(y for y, value in reach[thumb_side] if value > THUMB_REACH_FRACTION * span_x)
+    bulge = max((value for _y, value in reach[thumb_side]), default=0)
     return resampled, {
         "aspect": round(span_x / span_y, 6),
-        "thumbSide": "left" if left > len(below) - left else "right",
+        "thumbSide": thumb_side,
+        "thumbRootFraction": [round((band[0] - y0) / span_y, 6), round((band[-1] - y0) / span_y, 6)] if band else None,
+        "thumbReachFraction": round(max(0, bulge) / span_x, 6),
         "fingerBandFraction": round((knuckle - y0) / span_y, 6),
         "fingerSpanFraction": round((digit_bounds[1] - digit_bounds[0] + 1) / span_x, 6),
         "widthProfile": [list(entry) for entry in profile],

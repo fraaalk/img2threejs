@@ -100,23 +100,59 @@ is a worked example from a real reconstruction.
 
 ## The form gate, and why the plates are withheld
 
-`surfaceAtlas` is attached only when the form measures **five separate digits** — the count of solids a
-horizontal line crosses through the digit band, taken from the signed-distance field so it does not depend on
-the polygonisation grid. Short of that, the geometry report carries `surfaceProjectionWithheld` instead and the
-runtime renders the bare form.
+`surfaceAtlas` is attached only when **all five digits stand clear of the rest of the hand** — for each digit,
+whether any of its own surface lies outside every other part, sampled from the signed-distance field. Short of
+that, the geometry report carries `surfaceProjectionWithheld` instead and the runtime renders the bare form.
 
 The reason is specific. The palmar plate has the item's own thumb painted across its palm, so a four-digit
 model wearing that plate renders as five digits and every form defect behind the texture becomes invisible. A
 thumb fused into the palm mass survived a dozen textured renders here before an untextured one caught it.
 
-**Current state: the gate fails.** Measured on both the real Slingshot plates and the fixture, the form has
-four separate digits, not five. Below the knuckle line the plate's outline is a single connected run, so the
-palm/thumb boundary is an occlusion edge that no silhouette carries — mirroring the palm's taper from the far
-side to infer it predicted a palm edge at 1.106 of the silhouette's own width, because near the knuckles that
-far edge belongs to the pinky, and on the fixture the implied thumb excess came out at exactly zero. Four
-constructions were tried; each either contradicted the measured outline, pushing the silhouette aspect from a
-measured 0.618 out to 0.85, or produced lobes thinner than a grid cell that left the surface open. The thumb
-is present in the outline and in the texture, and it is not yet present as a digit.
+The first version of this gate counted the separate solids a horizontal line crosses through the digit band,
+and that instrument was wrong for this item: the thumb is tucked against the palm, so it lies behind the palm
+along the view axis for its whole length and no such line ever reaches it. The gate demanded a pose the
+reference does not have, and would have gone on failing a hand that was correct. Asking instead whether a
+digit's own surface is outside the other parts is pose-independent, because it is exactly the condition for
+that digit to be visible from some direction.
+
+Only the sign of the field is read. Two attempts to also require a clearance of one grid cell both
+mismeasured, because the ellipsoid distance in this descriptor is the scaled approximation
+`(|p/r| - 1) * min(r)`: its zero set is exact but its magnitude off the surface is compressed by the smallest
+radius, and compared against a cell it read 0.012 for a thumb standing a clear 0.08 of the frame off the palm.
+Whether the grid can resolve what the field separates is a separate question, already answered by
+`productionManifold` — a gap narrower than a cell welds, and welding shows up as a non-manifold edge.
+
+**Current state: the gate passes**, on both the real Slingshot plates and the fixture, with the mesh closed
+(no boundary and no non-manifold edges) and the extracted silhouette within 0.6% of the plate's own aspect.
+
+Two things had to be right for that, and both were wrong before:
+
+- **The pose.** The thumb runs alongside the palm's thumb-side edge, rotated onto its palmar side. That is the
+  only pose consistent with both plates at once — the dorsal plate barely shows the thumb, the palmar plate
+  shows a whole digit — and it took two wrong attempts to reach: standing the thumb in the digit row needs
+  width the measured span does not have, and folding it across the palm renders a lump rather than a digit.
+  The lobe the segment spans is measured from the outline; the tip's height comes from the lobe's top, the
+  base from the wrist, and the asymmetry is deliberate because the lobe test fails at each end for its own
+  reason. The depth is the palm-depth prior.
+- **The handedness.** A pair plate holds two gloves and the silhouette measures the largest component, which
+  on the real Slingshot plates is the *right* glove; every offset measured from it was then applied to the
+  left hand unmirrored, which put both thumbs on the outside of the pair where the plate plainly shows them
+  facing each other. Seen from the back of the hand the thumb lies on the side away from the body, so a
+  dorsal view whose thumb reaches toward image-left is a right hand, and the plate's own handedness is read
+  off that rather than assumed.
+
+One caution when comparing a render against a palmar plate: the CS2 palmar plate is each glove **spun in
+place**, not the dorsal arrangement seen from behind. Its thumbs point outward where the dorsal plate's point
+inward, and both are the same physical pair — a camera orbited to the far side would show them still pointing
+inward. So the two plates correspond through a mirror about *each hand's own centre*, not about the plate's,
+and an azimuth-180 render is not directly comparable to the palmar plate with the hands in their dorsal
+positions.
+
+What is still off, stated rather than left to be discovered: the four fingers come out about 23% slimmer than
+anthropometry, at 0.175 of the palm's width against a real 0.226. The cause is understood — the digit-row
+span is measured halfway up the digits, which is the last height where they resolve apart and also a height
+where they have already tapered — and no correction factor is applied for it, because the span at the knuckles
+is not observable from a plate whose digits merge into the palm there.
 
 ## Review gates
 

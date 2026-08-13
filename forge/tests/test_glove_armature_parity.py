@@ -32,8 +32,12 @@ from forge.stage3_build.generate_threejs_factory import _SDF_HELPER_SOURCE
 from forge.stage4_review.geometry_integrity import mesh_edge_counts
 
 FIXTURE = Path(__file__).parent / "fixtures" / "glove_sport_v1" / "dorsal.png"
-# Small enough for a pure-Python sampler in a test suite, large enough that the digits separate.
-PARITY_RESOLUTION = 24
+# Small enough for a pure-Python sampler in a test suite, large enough that the digits separate. 24 is not:
+# there the thumb's radius is 1.76 grid cells, under the two the extractor needs, and the mesh comes back with
+# three welded edges -- at the thumb's web and at the index and pinky knuckles. `build_glove_sdf_descriptor`
+# now refuses that grid outright, which is why this is 32. What the test measures is Python against JavaScript,
+# and they agree or disagree independently of how fine the grid is.
+PARITY_RESOLUTION = 32
 
 
 def _three_module() -> Path | None:

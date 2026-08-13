@@ -452,10 +452,14 @@ painted across its palm. That is not a hypothetical — it survived a dozen text
 before an untextured one caught it.
 
 So the projection is **withheld until the form measures up**, and the gate is in the builder rather than in
-a reviewer's memory. For `wearable-v1.0` that gate is the digit count: five separate solids crossed by a
-horizontal line through the digit band, measured from the signed-distance field so the answer does not
-depend on the polygonisation grid. Fewer than five and `surfaceAtlas` is not attached at all; the geometry
-report carries `surfaceProjectionWithheld` with the measured count, and the runtime renders the bare form.
+a reviewer's memory. For `wearable-v1.0` that gate is the digit count, and *how* it counts matters: a digit
+counts when some of its own surface lies outside every other part of the hand, sampled from the
+signed-distance field. That is the condition for the digit to be visible from any direction at all, and it is
+pose-independent — the first version counted solids crossed by a horizontal line through the digit band,
+which can only see digits standing side by side, and this glove's thumb is tucked against the palm where no
+such line reaches it. It would have failed a hand that was correct. Fewer than five and `surfaceAtlas` is not
+attached at all; the geometry report carries `surfaceProjectionWithheld` with the measured count, and the
+runtime renders the bare form.
 
 Two rules follow for any reconstruction, wearable or not:
 

@@ -29,7 +29,8 @@ sys.path.insert(0, str(ROOT))
 
 from forge._shared.glove_armature import DIGITS, build_glove_sdf_descriptor
 from forge._shared.glove_silhouette import measure_silhouette
-from forge._shared.sdf_mesh import sample_sdf
+from forge._shared.sdf_mesh import _apply_quaternion, _quaternion_from_euler_xyz, sample_sdf
+from forge.stage3_build.glove_armature_shell import measure_digit_protrusion
 
 FIXTURE = Path(__file__).parent / "fixtures" / "glove_sport_v1" / "dorsal.png"
 # Fine enough that a groove several hundredths of a unit wide cannot be stepped over.
@@ -146,11 +147,18 @@ class GloveArmatureFormTests(unittest.TestCase):
         thumb = next(item for item in self.body["primitives"] if item["id"] == "thumb-digit")
         # Against the deepest palm slice, not one named primitive: the palm is a swept stack now, and the
         # thumb has to leave the plane of the whole of it.
-        thumb_z = thumb["transform"]["translation"][2]
-        reach = thumb["height"] / 2.0 + thumb["radius"]
         palm_half_depth = max(item["radii"][2] for item in self.body["primitives"]
                               if item["type"] == "ellipsoid")
-        self.assertGreater(thumb_z + reach, palm_half_depth, "the thumb stays inside the palm's depth")
+        # Through the REALISED axis, and on the side the thumb actually leaves by. The earlier form read
+        # `translation.z + height/2 + radius`, which assumed both that the thumb was centred on the palm's
+        # own plane and that its whole length counted along z. Neither holds for a thumb posed as a segment:
+        # its centre is offset to the palmar side, so adding a positive reach to a negative centre measured
+        # the DORSAL end, and it reported 0.0858 against a palm 0.0927 deep for a thumb whose palmar surface
+        # reaches 0.238 -- a fail on geometry that had never been more correct.
+        axis = _apply_quaternion((0.0, 1.0, 0.0), _quaternion_from_euler_xyz(list(thumb["transform"]["rotation"])))
+        reach = abs(axis[2]) * thumb["height"] / 2.0 + thumb["radius"]
+        centre = thumb["transform"]["translation"][2]
+        self.assertLess(centre - reach, -palm_half_depth, "the thumb stays inside the palm's depth")
         self.assertNotEqual(thumb["transform"]["rotation"][1], 0.0)
 
     def test_digits_are_round_in_cross_section(self):
@@ -173,6 +181,44 @@ class GloveArmatureFormTests(unittest.TestCase):
         ratio = max(depth_runs) / runs[0]
         self.assertGreater(ratio, 0.7, f"digit is {ratio:.2f} as deep as it is wide; a finger is about 1")
         self.assertLess(ratio, 1.5, f"digit is {ratio:.2f} as deep as it is wide; a finger is about 1")
+
+    def test_all_five_digits_stand_clear_of_the_rest_of_the_hand(self):
+        """A glove has five digits, and four of them being obvious does not make the fifth exist.
+
+        The thumb is tucked against the palm, so it never crosses a line through the digit band and a
+        band-sweep count cannot see it -- the count that shipped before this asked for five digits side by
+        side, a pose the reference does not have. What makes a digit real is that some of its own surface is
+        outside every other part, which is the condition for it being visible from any direction at all.
+
+        This is the check that was missing when a thumb fused into the palm mass passed a dozen textured
+        renders, with the palmar plate's painted thumb supplying the fifth digit the form did not have.
+        """
+        protrusion = measure_digit_protrusion(self.body)
+        self.assertEqual(
+            protrusion["value"], 5.0,
+            f"only {protrusion['present']} stand clear; fractions {protrusion['protrudingFraction']}",
+        )
+
+    def test_consecutive_palm_slices_overlap_by_more_than_a_cell(self):
+        """The palm is a stack of slices, and an overlap thinner than a cell welds rather than joins.
+
+        Measured in the grid's own unit because that is where the constraint lives. Held as a dimensionless
+        1.15 multiple of the slice spacing instead, the overlap came out at 0.0028 against a cell of 0.0179
+        on the real plate -- six times too thin at every junction on the stack. The sweep was then manifold
+        only by where the samples happened to land, and the tell was that changes to the THUMB flipped the
+        mesh's non-manifold count: the thumb sets the bounds, the bounds set the cell, and the cell decided
+        whether the palm's own seams welded.
+        """
+        cell = (self.high[0] - self.low[0]) / self.body["resolution"]
+        slices = sorted(
+            (item for item in self.body["primitives"] if item["id"].startswith("palm-slice")),
+            key=lambda item: item["transform"]["translation"][1],
+        )
+        self.assertGreater(len(slices), 1)
+        for lower, upper in zip(slices, slices[1:]):
+            spacing = upper["transform"]["translation"][1] - lower["transform"]["translation"][1]
+            overlap = lower["radii"][1] + upper["radii"][1] - spacing
+            self.assertGreater(overlap, cell, f"slices overlap {overlap:.5f}, under one cell {cell:.5f}")
 
 
 if __name__ == "__main__":
