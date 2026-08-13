@@ -439,9 +439,15 @@ render-vs-reference gate below is an obligation on the agent performing a recons
 tooling (`divine_eye`, `diagnose_render`, `make_comparison_sheet`) is not glove-specific — it is the
 wearable *review pipeline* that produces no automated resemblance measurement, not the gate that is
 waived. `capture_sanity` runs there as a precondition, never as a scored metric: a framing
-defect is a capture defect. Full gate table, the two permitted scene threshold statuses, and the
-recorded known defects (coincident hands, hardcoded panel loops, the quarantined
-`thumb-side-profile` capture): `docs/CS2_GLOVE_WORKFLOW.md`.
+defect is a capture defect. Full gate table, the two permitted scene threshold statuses, how the hand
+armature splits what the plate observed from what a prior supplies, and the recorded known defects:
+`docs/CS2_GLOVE_WORKFLOW.md`.
+
+Two CS2 plates are both front-axis views, so they carry **no depth information at all** and one pixel
+in five of the render is surface neither plate photographed — measured 19.2% of the dorsal view's
+visible area. The depth axis is an anthropometric prior, declared as `derivation.axes.z.state:
+inferred`, and the tier cannot leave `diagnostic` without a side view. Call the result a plausible hand
+form wearing an accurately projected texture, not a reconstruction.
 
 ### Layer contract
 

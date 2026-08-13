@@ -105,15 +105,22 @@ export async function createCaptureManifest(bundlePath, scene = {}) {
 
 function viewerDocument(payloads, bundle) {
   const descriptor = bundle?.geometryDescriptor?.silhouetteInflation ?? null;
+  // The armature route carries one implicit solid per hand, each already placed in its own bounds, so
+  // the hand is not a parameter of one shared descriptor the way it is for the inflation.
+  const armature = bundle?.geometryDescriptor?.armature ?? null;
   const atlas = bundle?.surfaceAtlas ?? null;
-  const encodedPayloads = JSON.stringify(descriptor ? [] : payloads).replace(/</g, '\\u003c');
+  const procedural = descriptor || armature;
+  const encodedPayloads = JSON.stringify(procedural ? [] : payloads).replace(/</g, '\\u003c');
   const encodedDescriptor = JSON.stringify(descriptor).replace(/</g, '\\u003c');
+  const encodedArmature = JSON.stringify(armature).replace(/</g, '\\u003c');
   const hands = JSON.stringify(descriptor?.hands ?? ['left', 'right']);
   return `<!doctype html><meta charset="utf-8"><title>Glove review runtime</title><style>html,body,canvas{margin:0;width:100%;height:100%;overflow:hidden}</style><canvas></canvas><script type="module">
 import * as THREE from './three.module.js';
 import { buildShellAttributes } from './shell.mjs';
+import { buildSdfAtlasAttributes } from './sdf.mjs';
 const payloads = ${encodedPayloads};
 const descriptor = ${encodedDescriptor};
+const armature = ${encodedArmature};
 const canvas = document.querySelector('canvas');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:false, preserveDrawingBuffer:true});
 renderer.setPixelRatio(1); renderer.setSize(1024,1024,false); renderer.setClearColor(0xffffff,1);
@@ -123,7 +130,19 @@ ${atlas ? `// Unlit on purpose: the capture must be byte-identical across repeat
 const texture = await new THREE.TextureLoader().loadAsync('./${atlas.path}');
 texture.colorSpace = THREE.SRGBColorSpace; texture.flipY = false;
 const material = new THREE.MeshBasicMaterial({map: texture});` : `const material = new THREE.MeshNormalMaterial();`}
-if (descriptor) {
+if (armature) {
+  // Procedural: the browser polygonizes each hand's signed-distance field from the parameters the
+  // review measured. The atlas uvs are unindexed per triangle, so this geometry carries no index.
+  for (const hand of Object.keys(armature)) {
+    const built = buildSdfAtlasAttributes(THREE, armature[hand].sdf);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(built.positions,3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(built.normals,3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(built.uvs,2));
+    geometry.computeBoundingSphere();
+    scene.add(new THREE.Mesh(geometry, material));
+  }
+} else if (descriptor) {
   // Procedural: the browser rebuilds the shell from the parameters the review measured, rather
   // than loading triangles somebody else baked.
   for (const hand of ${hands}) {
@@ -151,7 +170,9 @@ export async function writeBrowserRuntime(bundlePath, outputPath) {
   const root = dirname(output);
   const threeBuild = resolve(new URL('../node_modules/three/build', import.meta.url).pathname);
   await cp(threeBuild, root, { recursive: true, force: true });
-  await cp(resolve(new URL('./shell.mjs', import.meta.url).pathname), resolve(root, 'shell.mjs'), { force: true });
+  for (const module of ['shell.mjs', 'sdf.mjs']) {
+    await cp(resolve(new URL(`./${module}`, import.meta.url).pathname), resolve(root, module), { force: true });
+  }
   if (bundle?.surfaceAtlas?.path) {
     // The atlas is hash-bound in the bundle, so a swapped texture is a digest mismatch, not a
     // surprise in the capture.

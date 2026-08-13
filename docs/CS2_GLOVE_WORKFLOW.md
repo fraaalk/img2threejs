@@ -1,10 +1,42 @@
 # CS2 Sport Gloves workflow
 
 This checkout implements a diagnostic v3 review path for one narrow target: static, full-finger
-`sport-gloves`, normalized scale, canonical-left geometry plus a mirrored right hand. Geometry is derived
-from the admitted view's silhouette and inflated over a chamfer medial axis, giving one closed shell per
-hand, so manifoldness is measured rather than promised. It still cannot return `ready`: depth comes from
-an anthropometric prior rather than a side view, which pins `evidenceTier` to `diagnostic`.
+`sport-gloves`, normalized scale, canonical-left geometry plus a mirrored right hand. It still cannot
+return `ready`: depth comes from an anthropometric prior rather than a side view, which pins
+`evidenceTier` to `diagnostic`.
+
+## How the geometry is built
+
+A hand armature fitted to the admitted plate, expressed as `geometryDescriptor.sdf` and meshed by the
+same extractor the browser runs. `forge/_shared/glove_armature.py` builds it, `forge/_shared/sdf_mesh.py`
+meshes it in Python so stage 4 reviews the mesh that ships, and
+`forge/tests/test_glove_armature_parity.py` pins Python, the emitted TypeScript and the review runtime's
+`sdf.mjs` to each other vertex for vertex.
+
+What the plate supplies and what a prior supplies, because the split is the honest part:
+
+| observed from the plate | prior, declared as one |
+|---|---|
+| silhouette aspect, and the outline width and centre at each height below the knuckle line | palm depth, digit radius ratio, thumb out-of-plane angle |
+| the knuckle line, as the widest row | digit placement across the measured row |
+| the digit row's width, halfway down the digit band | per-digit length ratios (cited anthropometry, not measured here) |
+| which side the thumb is on | the thumb's out-of-plane orientation |
+
+The palm sweeps the measured outline as a stack of ellipsoid slices rather than one ellipsoid: an
+ellipsoid of palm width by palm height is a circle, where the real plate shows a trapezoid tapering from
+0.95 of full width at the knuckles to 0.68 at the cuff.
+
+Two things are set by the polygonisation grid rather than chosen, because a grid extractor has exactly
+two representable states for nearby solids -- a gap wider than a cell, or a real overlap:
+
+- the gap between digits, in cells;
+- how many outline slices the palm gets, being its height divided by the cell size.
+
+An earlier route inflated the silhouette over a chamfer medial axis. It is kept as the
+`silhouette-inflation` primitive because specs reference it, but it cannot produce a hand: thickness there
+is proportional to the 2D distance to the outline, so a finger is always flat. Measured on the real
+Slingshot plates its digits came out 0.13-0.18 as deep as they were wide, where a finger is about 1.0, and
+the thumb's z range sat inside the palm's -- the same plane as the fingers.
 
 **What this track does not claim.** No gate compares the render to the reference, so the review's verdict
 says nothing about whether the model resembles the reference image. `CLAUDE.md`'s screenshot gate binds the
@@ -122,14 +154,22 @@ deliberately rejected.
   silhouette, so two CS2 plates carry no depth information at all. Thickness comes from an anthropometric
   palm ratio, recorded as `derivation.axes.z.state: inferred`, and the tier stays `diagnostic` until a side
   view supplies it.
-- **The rim's UV sweeps across the atlas seam.** A rim quad joins front vertices (`u < 0.5`) to back vertices
-  (`u > 0.5`), so its texture coordinate interpolates through the middle of the atlas. Visible as fringing at
-  above-capture resolution. Fixing it means splitting rim vertices, which trades against `productionManifold`
-  because edges are counted by vertex index — a decision about which gate measures what it names, not a tweak.
-- **Digits fuse where the reference shows them touching.** A silhouette cannot separate what the photo does
-  not separate.
-- **Front and back inflate symmetrically without a palmar plate.** With one, the back follows the palmar
-  medial axis at a declared 0.4 thickness share; measured 1.50x dorsal-to-palmar on real plates.
+- **One pixel in five of the render was never photographed.** Measured on the real Slingshot plates from
+  the dorsal camera: 80.8% of the visible area is surface a plate actually faced, 15.1% is the sides of
+  the digits and palm, 4.1% is fingertip caps and the cuff's rim. Every remaining texturing artefact lives
+  in that 19.2%.
+- **The grazing band along the silhouette edge wears stretched texels.** Where the surface turns away from
+  the plate's own camera, a projection along that camera's axis compresses its last texels into a band.
+  Three alternatives were built and measured — the silhouette's hull edge per row, then per row and column
+  by dominant face axis, then that stepped two cells inward — and none beat plain planar projection; the
+  last moved 3,771 uvs by up to 8% of a plate and changed the render not at all. It is foreshortening, not
+  a lookup mistake, so the simplest scheme is kept and the band is declared. A side view is the only cure.
+- **The digits are separated by a gap where the reference shows them touching.** With the digits joined by
+  a hard union they meet in a crease, which is what the reference shows, but a crease is visible only
+  through shading and the review runtime renders unlit on purpose so a repeat capture is byte-identical.
+  Under a material with no lighting a creased mitten and a solid mitten are the same picture, so the
+  separation has to be geometric. A property of the renderer, not of the hand.
+- **Fingertip caps are hemispheres.** The reference shows blunt, square, stitched caps.
 
 Fixed since the panel route, and kept here because the review gates that caught them still guard them: the
 two hands were coincident (six of twelve panels shared bounding boxes) and no input image affected any

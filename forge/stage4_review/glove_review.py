@@ -141,7 +141,21 @@ def _derived_metrics(report: dict[str, Any], bundle: dict[str, Any], capture: di
     return {key: _metric(values[key], source) for key in METRIC_KINDS if key in values}
 
 
-def _capture_precondition_failures(root: Path, capture: dict[str, Any]) -> list[str]:
+def _declared_subject_count(bundle: dict[str, Any]) -> int:
+    """How many separate objects the bundle says are in the scene.
+
+    A `sport-gloves` bundle names a canonical hand and a derived one, so the render is two objects and
+    the fragmentation precondition must budget for two components. Reading it from the bundle rather
+    than assuming two keeps a single-glove subtype honest, and the intake side already draws the same
+    distinction through its `paired-glove-plate-v1` override.
+    """
+    pair = bundle.get("pair")
+    if not isinstance(pair, dict):
+        return 1
+    return len({pair.get("canonicalHand"), pair.get("derivedHand")} - {None}) or 1
+
+
+def _capture_precondition_failures(root: Path, capture: dict[str, Any], *, expected_subjects: int = 1) -> list[str]:
     """Run the framing pre-flight as a precondition; a framing defect is never a model defect."""
     failures: list[str] = []
     for item in capture.get("captures", []):
@@ -156,7 +170,7 @@ def _capture_precondition_failures(root: Path, capture: dict[str, Any]) -> list[
         png = (root / path_value).resolve()
         if not png.is_file():
             continue
-        for reason in capture_sanity_check(capture_sanity_measure(png), None):
+        for reason in capture_sanity_check(capture_sanity_measure(png), None, expected_subjects=expected_subjects):
             failures.append(f"capture-sanity:{role}:{reason}")
     return failures
 
@@ -372,7 +386,9 @@ def evaluate_glove_review(manifest: dict[str, Any], artifacts: dict[str, Any], s
         provenance_verified, spec = _verify_bundle_provenance(bundle, bundle_path, manifest)
         capture, capture_failures = _verify_capture_manifest(capture_path, bundle, scene)
         capture_failures.extend(f"geometry-production:{error}" for error in production_errors)
-        capture_failures.extend(_capture_precondition_failures(capture_path.parent.resolve(), capture))
+        capture_failures.extend(_capture_precondition_failures(
+            capture_path.parent.resolve(), capture, expected_subjects=_declared_subject_count(bundle),
+        ))
         spec_failures = _spec_failures(spec)
         surface_errors = validate_glove_surface_contract(report, spec if isinstance(spec, dict) else {})
         capture_failures.extend(f"surface-contract:{error}" for error in surface_errors)

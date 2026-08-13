@@ -77,6 +77,49 @@ def largest_component_fraction(
     return best / total
 
 
+def component_fractions(mask: list[bool], width: int, height: int, grid: int = COHERENCE_GRID) -> list[float]:
+    """Every 4-connected blob's share of the foreground, largest first.
+
+    `largest_component_fraction` answers "is this one thing?", which is the wrong question when the
+    subject is declared to be two things -- a glove *pair* is two blobs of about half the foreground
+    each, and no threshold on the largest alone can tell that apart from one glove beside a shadow.
+    """
+    if width <= 0 or height <= 0 or not mask:
+        return []
+    g = min(grid, max(1, width), max(1, height))
+    cell = [[False] * g for _ in range(g)]
+    for idx, on in enumerate(mask):
+        if not on:
+            continue
+        x = idx % width
+        y = idx // width
+        if y >= height:
+            break
+        cell[min(g - 1, y * g // height)][min(g - 1, x * g // width)] = True
+    total = sum(1 for row in cell for value in row if value)
+    if total == 0:
+        return []
+    seen = [[False] * g for _ in range(g)]
+    sizes: list[int] = []
+    for sy in range(g):
+        for sx in range(g):
+            if not cell[sy][sx] or seen[sy][sx]:
+                continue
+            size = 0
+            stack = [(sy, sx)]
+            seen[sy][sx] = True
+            while stack:
+                cy, cx = stack.pop()
+                size += 1
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ny, nx = cy + dy, cx + dx
+                    if 0 <= ny < g and 0 <= nx < g and cell[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        stack.append((ny, nx))
+            sizes.append(size)
+    return sorted((size / total for size in sizes), reverse=True)
+
+
 def check_admission(
     crop_path: Path,
     viewpoint: str = "reference",

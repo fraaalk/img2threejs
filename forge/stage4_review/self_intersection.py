@@ -38,7 +38,7 @@ from typing import Any
 
 # A gate that quietly inspects a tenth of a mesh and then reports "clean" is worse than no gate, so
 # this budget is a cap on WORK, never on what the result claims: every result carries
-# sampledVertexCount / totalVertexCount / samplingStride so the coverage is on the face of it.
+# sampledTriangleCount / totalTriangleCount / samplingStride so the coverage is on the face of it.
 MAX_SAMPLED_VERTICES = 4000
 
 # The offset distance is a fraction of the mesh's bounding-box diagonal rather than an absolute
@@ -294,13 +294,13 @@ def _error_result(name: str, message: str, total_vertices: int = 0) -> dict[str,
         "analyzed": False,
         "error": message,
         "selfIntersecting": False,
-        "insideVertexCount": 0,
-        "undecidedVertexCount": 0,
-        "outsideVertexCount": 0,
-        "sampledVertexCount": 0,
-        "totalVertexCount": total_vertices,
+        "insideTriangleCount": 0,
+        "undecidedTriangleCount": 0,
+        "outsideTriangleCount": 0,
+        "sampledTriangleCount": 0,
+        "totalTriangleCount": 0,
         "samplingStride": 0,
-        "triangleCount": 0,
+        "vertexCount": total_vertices,
         "degenerateTriangleCount": 0,
         "worstRegions": [],
         "normalSource": None,
@@ -376,64 +376,65 @@ def analyze_mesh(
     if not live:
         return _error_result(name, "mesh has no non-degenerate triangles", vertex_count)
 
+    # Ray parity is only defined on a closed surface: on an open one a ray can leave through a hole
+    # without crossing anything, so the count says nothing about inside or outside. Declining is the
+    # only honest answer -- the old vertex sampling returned a confident "clean" for the open panel
+    # blockout, and a verdict nobody measured reads exactly like one that passed. Edges are welded by
+    # rounded position, matching `geometry_integrity`'s own vertex identity, so a seam-duplicated vertex
+    # does not read as a hole.
+    edge_use: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    for triangle in live:
+        keys = [tuple(round(value, WELD_PRECISION) for value in vertices[corner]) for corner in triangle]
+        for index in range(3):
+            a, b = keys[index], keys[(index + 1) % 3]
+            edge_use[(a, b) if a <= b else (b, a)] = edge_use.get((a, b) if a <= b else (b, a), 0) + 1
+    boundary_edges = sum(1 for count in edge_use.values() if count == 1)
+    if boundary_edges:
+        return _error_result(
+            name,
+            f"surface is not closed ({boundary_edges} boundary edges), so ray parity has no inside to "
+            "measure; close the surface or gate it on topology instead",
+            vertex_count,
+        )
+
     # Fixed stride, never random: the same mesh must produce the same sample set every run.
-    stride = max(1, -(-vertex_count // max(1, int(max_samples))))
-    sampled = list(range(0, vertex_count, stride))
-
-    normals = mesh.get("normals")
-    use_supplied_normals = isinstance(normals, list) and len(normals) == vertex_count
-    normal_source = "vertexNormals" if use_supplied_normals else "centroid"
-    centroid = (
-        sum(vertex[0] for vertex in vertices) / vertex_count,
-        sum(vertex[1] for vertex in vertices) / vertex_count,
-        sum(vertex[2] for vertex in vertices) / vertex_count,
-    )
-
-    # Weld by rounded position rather than by index so that a seam-duplicated vertex sharing a
-    # position still masks the triangles that meet there. Without this, the surface the sample sits
-    # on gets counted as a crossing and every seam vertex reads as a false positive.
-    keys = [tuple(round(value, WELD_PRECISION) for value in vertex) for vertex in vertices]
-    sampled_keys = {keys[index] for index in sampled}
-    incident: dict[tuple[float, ...], set[int]] = {key: set() for key in sampled_keys}
-    for triangle_index, triangle in enumerate(live):
-        for corner in triangle:
-            bucket = incident.get(keys[corner])
-            if bucket is not None:
-                bucket.add(triangle_index)
+    stride = max(1, -(-len(live) // max(1, int(max_samples))))
+    sampled = list(range(0, len(live), stride))
 
     grids = [_DirectionGrid(direction, vertices, live) for direction in RAY_DIRECTIONS]
 
     inside_indices: list[int] = []
+    centroids: dict[int, Vector3] = {}
     undecided = 0
-    normal_fallbacks = 0
-    for vertex_index in sampled:
-        vertex = vertices[vertex_index]
-        outward: Vector3 | None = None
-        if use_supplied_normals:
-            try:
-                outward = _normalize(_as_point(normals[vertex_index]))
-            except (TypeError, ValueError):
-                outward = None
-        if outward is None:
-            if use_supplied_normals:
-                # A zero-length or malformed normal on one vertex is not a reason to abandon the
-                # good normals on every other vertex; fall back for this vertex and say how often.
-                normal_fallbacks += 1
-            outward = _normalize((
-                vertex[0] - centroid[0],
-                vertex[1] - centroid[1],
-                vertex[2] - centroid[2],
-            ))
-        if outward is None:
-            # A vertex sitting exactly on the centroid has no outward direction to step along.
-            undecided += 1
-            continue
-        origin = (
-            vertex[0] + outward[0] * offset,
-            vertex[1] + outward[1] * offset,
-            vertex[2] + outward[2] * offset,
+    for triangle_index in sampled:
+        entry = prepared[triangle_index]
+        pa, e1, e2, normal_length = entry[0:3], entry[3:6], entry[6:9], entry[9]
+        # The face's own normal, exact rather than averaged, and never absent: a triangle with no
+        # normal is degenerate and was already kept out of `live`.
+        outward = (
+            (e1[1] * e2[2] - e1[2] * e2[1]) / normal_length,
+            (e1[2] * e2[0] - e1[0] * e2[2]) / normal_length,
+            (e1[0] * e2[1] - e1[1] * e2[0]) / normal_length,
         )
-        excluded = incident[keys[vertex_index]]
+        centroid = (
+            pa[0] + (e1[0] + e2[0]) / 3.0,
+            pa[1] + (e1[1] + e2[1]) / 3.0,
+            pa[2] + (e1[2] + e2[2]) / 3.0,
+        )
+        origin = (
+            centroid[0] + outward[0] * offset,
+            centroid[1] + outward[1] * offset,
+            centroid[2] + outward[2] * offset,
+        )
+        centroids[triangle_index] = centroid
+        # Exactly one triangle stands under this origin, so exactly one is masked. That is the reason
+        # the sample sits on a face and not on a vertex: a vertex is shared by a fan of triangles, all
+        # of which had to be masked, and where the surface is locally concave -- a staircase, which is
+        # what any curved surface becomes on a voxel grid -- part of that fan lies in the outward
+        # hemisphere as well. Masking it dropped a real crossing and flipped the parity. Measured on
+        # the glove armature, vertex sampling called 552 of 3,900 samples inside a surface whose
+        # generalized winding number is 0 at every one of them.
+        excluded = {triangle_index}
         votes: list[bool] = []
         reliable = True
         for direction, grid in zip(RAY_DIRECTIONS, grids):
@@ -458,7 +459,7 @@ def analyze_mesh(
             # A tie has no majority, so there is no verdict to report.
             undecided += 1
         elif inside_votes * 2 > len(votes):
-            inside_indices.append(vertex_index)
+            inside_indices.append(triangle_index)
 
     # Spread the reported positions across the offending set instead of returning the first eight,
     # which on a large defect would all come from one corner of one region. There is no severity
@@ -466,7 +467,7 @@ def analyze_mesh(
     # human can navigate to, not a ranking.
     region_stride = max(1, len(inside_indices) // WORST_REGION_LIMIT)
     worst = [
-        {"vertexIndex": index, "position": list(vertices[index])}
+        {"triangleIndex": index, "position": list(centroids[index])}
         for index in inside_indices[::region_stride][:WORST_REGION_LIMIT]
     ]
 
@@ -475,17 +476,18 @@ def analyze_mesh(
         "analyzed": True,
         "error": None,
         "selfIntersecting": bool(inside_indices),
-        "insideVertexCount": len(inside_indices),
-        "undecidedVertexCount": undecided,
-        "outsideVertexCount": len(sampled) - len(inside_indices) - undecided,
-        "sampledVertexCount": len(sampled),
-        "totalVertexCount": vertex_count,
+        # Named for the sample unit, which is a triangle: the probe asks whether a face stands inside
+        # the volume its own surface bounds.
+        "insideTriangleCount": len(inside_indices),
+        "undecidedTriangleCount": undecided,
+        "outsideTriangleCount": len(sampled) - len(inside_indices) - undecided,
+        "sampledTriangleCount": len(sampled),
+        "totalTriangleCount": len(live),
         "samplingStride": stride,
-        "triangleCount": len(live),
+        "vertexCount": vertex_count,
         "degenerateTriangleCount": degenerate,
         "worstRegions": worst,
-        "normalSource": normal_source,
-        "normalFallbackCount": normal_fallbacks,
+        "normalSource": "faceNormals",
         "epsilon": offset,
         "rayDirectionCount": len(RAY_DIRECTIONS),
     }
@@ -511,10 +513,10 @@ def analyze_meshes(
     return {
         "selfIntersecting": any(report["selfIntersecting"] for report in reports),
         "meshCount": len(reports),
-        "insideVertexCount": sum(report["insideVertexCount"] for report in reports),
-        "undecidedVertexCount": sum(report["undecidedVertexCount"] for report in reports),
-        "sampledVertexCount": sum(report["sampledVertexCount"] for report in reports),
-        "totalVertexCount": sum(report["totalVertexCount"] for report in reports),
+        "insideTriangleCount": sum(report["insideTriangleCount"] for report in reports),
+        "undecidedTriangleCount": sum(report["undecidedTriangleCount"] for report in reports),
+        "sampledTriangleCount": sum(report["sampledTriangleCount"] for report in reports),
+        "totalTriangleCount": sum(report["totalTriangleCount"] for report in reports),
         "meshes": reports,
         "errors": errors,
     }
@@ -546,14 +548,14 @@ def _format_summary(result: dict[str, Any]) -> str:
         flag = "SELF-INTERSECTING" if report["selfIntersecting"] else "ok"
         lines.append(
             f"  [{flag}] {report['name']} "
-            f"sampled={report['sampledVertexCount']}/{report['totalVertexCount']} "
+            f"sampled={report['sampledTriangleCount']}/{report['totalTriangleCount']} "
             f"(stride {report['samplingStride']}) "
-            f"inside={report['insideVertexCount']} undecided={report['undecidedVertexCount']} "
+            f"inside={report['insideTriangleCount']} undecided={report['undecidedTriangleCount']} "
             f"normals={report['normalSource']} epsilon={report['epsilon']:.6g}"
         )
         for region in report["worstRegions"]:
             position = ", ".join(f"{value:.4f}" for value in region["position"])
-            lines.append(f"      vertex {region['vertexIndex']} at ({position})")
+            lines.append(f"      triangle {region['triangleIndex']} centred at ({position})")
     if result["errors"]:
         verdict = "ERROR"
     elif result["selfIntersecting"]:

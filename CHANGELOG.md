@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **BREAKING** — the SDF extractor is naive surface nets, not binary voxel occupancy. Every vertex is now
+  the interpolated zero crossing of one cell's edges instead of an integer grid corner, which changes the
+  mesh of every `geometryDescriptor.sdf` component. The old extractor could not represent a crease between
+  two solids that touch without a gap — so two fingers pressed together came out as one mitten and had to
+  be held apart artificially — it was faceted at cell scale at any resolution, and because every face was
+  axis-aligned it left **35% of triangles with exactly zero uv area**, a third of the surface wearing one
+  line of the texture. Measured after: 1.4-2.8%, and none of them on a face a plate faced. It also removes
+  the diagonal-contact repair pass the old extractor needed to stay manifold.
+- **BREAKING** — glove geometry is a hand armature fitted to the plate (`derivation.tier:
+  sdf-armature-v1`), replacing the chamfer medial-axis inflation. The inflation stays available as the
+  `silhouette-inflation` primitive but cannot produce a hand: its thickness is proportional to the 2D
+  distance to the outline, so measured on the real Slingshot plates its digits were 0.13-0.18 as deep as
+  wide where a finger is about 1.0, and its thumb sat in the plane of the fingers. The palm now sweeps the
+  measured outline as a stack of slices rather than being one ellipsoid, which was a circle where the plate
+  shows a trapezoid.
+- `geometryDescriptor.sdf` gains a hard `union` operation and an opt-in `uvProjection`. `union` is what
+  lets two touching digits keep a crease: `smooth-union` blends by proximity, so anything adjacent fuses
+  regardless of whether it is the same body part, and the operations now form an anatomical tree — digits
+  hard-unioned to each other, filleted to the palm — instead of one flat chain.
+- Digit gaps and palm slice counts are derived from the polygonisation cell size instead of being chosen.
+  A grid extractor has two representable states for nearby solids, a gap wider than a cell or a real
+  overlap; a gap expressed as a fraction of a diameter silently fell under a cell and pinched the surface.
+- `nonDegenerateExtrusion` for an implicit solid reports the smallest primitive cross-section, and says so.
+  Two attempts to measure it off the distance field were instruments rather than measurements: 6-neighbour
+  local maxima also fire on the saddle points a smooth union is full of (reported 0.008 for a solid whose
+  slimmest part is 0.088), and walking inward from the surface is meaningless in a concave crease
+  (reported 0.0008 for the same solid). Both failed the gate on a mesh that was never thin.
 - **BREAKING** — `wearable-v1.0` glove review report is now `glove-review-report.v3`. The thirteen
   metrics carried nine aliases of one topology boolean while their `0.85`/`0.95` thresholds were
   unreachable (every value was `float(bool)`), and the evaluator never read the calibrated scene's

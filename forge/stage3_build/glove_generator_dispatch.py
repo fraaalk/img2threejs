@@ -10,7 +10,7 @@ from forge._shared.glove_silhouette import resolve_target_views
 from forge.stage1_intake.glove_contracts import GLOVE_ASSEMBLY_VERSION, glove_manifest_errors
 from forge.stage2_spec.glove_assembly import build_glove_assembly, canonical_hash, validate_glove_assembly, write_json_atomic
 from forge.stage3_build.glove_artifacts import build_bundle_from_geometry
-from forge.stage3_build.glove_shell import build_glove_shell_geometry
+from forge.stage3_build.glove_armature_shell import build_glove_armature_geometry
 
 
 def _digest(payload: Any) -> str:
@@ -83,7 +83,7 @@ def build_glove_model_from_artifacts(
     outline, palmar = resolve_target_views(manifest)
     if outline is None:
         raise ValueError("no admitted target view with a readable image to measure the shell outline from")
-    geometry = build_glove_shell_geometry(
+    geometry = build_glove_armature_geometry(
         outline[0], source_view_id=outline[1],
         palmar_reference=palmar[0] if palmar else None,
         palmar_source_view_id=palmar[1] if palmar else None,

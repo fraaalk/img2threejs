@@ -7,7 +7,14 @@ from typing import Any
 
 
 VALID_SDF_PRIMITIVES = {"sphere", "capsule", "box", "cone", "ellipsoid"}
-VALID_SDF_OPERATIONS = {"smooth-union", "subtract", "intersect"}
+# `union` is the hard minimum: the two operands keep a crease where they meet instead of melting into
+# each other. It is what makes two touching fingers read as two fingers -- `smooth-union` blends by
+# proximity, so anything adjacent fuses regardless of whether it is the same body part.
+VALID_SDF_OPERATIONS = {"union", "smooth-union", "subtract", "intersect"}
+# An implicit surface carries no uvs, so a textured one has to declare how to acquire them. The only
+# mode is the two-plate atlas a photographed front/back pair produces.
+VALID_SDF_UV_PROJECTIONS = {"atlas-front-back"}
+_UV_PROJECTION_FIELDS = {"mode", "flipU", "frame"}
 MAX_SDF_PRIMITIVES = 64
 MAX_SDF_OPERATIONS = 128
 _PRIMITIVE_FIELDS = {"id", "type", "center", "radius", "height", "size", "dimensions", "radii", "transform"}
@@ -156,6 +163,33 @@ def validate_sdf_descriptor(component_id: str, descriptor: Any, errors: list[str
         errors.append(f"{label}.resolution must be an integer from 4 to 64")
     elif resolution > 64:
         errors.append(f"{label}.resolution must not exceed 64")
+    projection = descriptor.get("uvProjection")
+    if projection is not None:
+        if not isinstance(projection, dict):
+            errors.append(f"{label}.uvProjection must be an object")
+        else:
+            for field in projection:
+                if field not in _UV_PROJECTION_FIELDS:
+                    errors.append(f"{label}.uvProjection.{field} is not supported")
+            if projection.get("mode") not in VALID_SDF_UV_PROJECTIONS:
+                errors.append(
+                    f"{label}.uvProjection.mode must be one of: {', '.join(sorted(VALID_SDF_UV_PROJECTIONS))}"
+                )
+            if "flipU" in projection and not isinstance(projection["flipU"], bool):
+                errors.append(f"{label}.uvProjection.flipU must be true or false")
+            frame = projection.get("frame")
+            if frame is not None:
+                if not isinstance(frame, dict):
+                    errors.append(f"{label}.uvProjection.frame must be an object")
+                else:
+                    for corner in ("min", "max"):
+                        value = frame.get(corner)
+                        if not isinstance(value, list) or len(value) != 2 or not all(_is_number(item) for item in value):
+                            errors.append(f"{label}.uvProjection.frame.{corner} must be [x, y]")
+                    if all(isinstance(frame.get(corner), list) and len(frame[corner]) == 2 for corner in ("min", "max")):
+                        for axis in range(2):
+                            if frame["min"][axis] >= frame["max"][axis]:
+                                errors.append(f"{label}.uvProjection.frame.min[{axis}] must be less than frame.max[{axis}]")
     bounds = descriptor.get("bounds")
     if bounds is not None:
         if not isinstance(bounds, dict):

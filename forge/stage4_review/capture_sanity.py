@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "stage1_intake"))
 
 from check_reference_admission import (  # noqa: E402
     build_foreground_mask,
+    component_fractions,
     largest_component_fraction,
     load_image,
 )
@@ -44,8 +45,11 @@ MIN_SUBJECT_FRACTION = 0.02
 # Above this, the "subject" is the whole frame -- a segmentation fallback or a background that
 # failed to key, not a subject.
 MAX_SUBJECT_FRACTION = 0.92
-# Foreground that is not one connected thing means something else is in frame with the subject.
-# A contact shadow is the common case and the one that silently inflates a silhouette bbox.
+# Foreground that is not the declared subject means something else is in frame with it. A contact
+# shadow is the common case and the one that silently inflates a silhouette bbox. The budget is spent
+# across as many components as the scene declares subjects, so a glove *pair* -- two blobs of about
+# half the foreground each -- is not read as one glove beside a shadow. A single subject keeps exactly
+# the rule it had.
 MIN_LARGEST_COMPONENT = 0.90
 # How far the render's framing may differ from the reference's before the comparison is measuring
 # framing rather than fidelity.
@@ -59,6 +63,7 @@ def measure(path: Path) -> dict[str, Any]:
     covered = sum(1 for value in mask if value)
     fraction = covered / total if total else 0.0
     largest = largest_component_fraction(mask, width, height) if covered else 0.0
+    fractions = component_fractions(mask, width, height) if covered else []
 
     xs = [i % width for i, v in enumerate(mask) if v]
     ys = [i // width for i, v in enumerate(mask) if v]
@@ -73,6 +78,7 @@ def measure(path: Path) -> dict[str, Any]:
         "resolution": [width, height],
         "subjectFraction": round(fraction, 4),
         "largestComponentFraction": round(largest, 4),
+        "componentFractions": [round(value, 4) for value in fractions],
         "bbox": bbox,
         "bboxFraction": bbox_fraction,
         "warnings": list(warnings) + list(mask_warnings),
@@ -80,7 +86,7 @@ def measure(path: Path) -> dict[str, Any]:
     }
 
 
-def check(render: dict[str, Any], reference: dict[str, Any] | None) -> list[str]:
+def check(render: dict[str, Any], reference: dict[str, Any] | None, *, expected_subjects: int = 1) -> list[str]:
     failures: list[str] = []
     frac = render["subjectFraction"]
 
@@ -105,13 +111,17 @@ def check(render: dict[str, Any], reference: dict[str, Any] | None) -> list[str]
             "downstream silhouette number would be measuring the frame, not the subject."
         )
 
-    largest = render["largestComponentFraction"]
-    if largest < MIN_LARGEST_COMPONENT:
+    subjects = max(1, int(expected_subjects))
+    fractions = render.get("componentFractions") or [render["largestComponentFraction"]]
+    covered = sum(fractions[:subjects])
+    if covered < MIN_LARGEST_COMPONENT:
+        counted = ", ".join(f"{value:.4f}" for value in fractions[:subjects])
         failures.append(
-            f"{render['path']}: the largest connected foreground component is only {largest:.4f} "
-            "of the foreground, so something that is not the subject shares the frame. A contact "
-            "shadow is the usual cause and it inflates the silhouette bbox on ONE axis, which "
-            "reads downstream as wrong proportions. Hide shadow catchers for review captures."
+            f"{render['path']}: the {subjects} largest connected foreground component(s) cover only "
+            f"{covered:.4f} of the foreground ({counted}), so something that is not the subject shares "
+            "the frame. A contact shadow is the usual cause and it inflates the silhouette bbox on ONE "
+            "axis, which reads downstream as wrong proportions. Hide shadow catchers for review "
+            "captures."
         )
 
     if reference is not None:

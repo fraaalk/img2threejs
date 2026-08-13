@@ -40,10 +40,14 @@ FIXTURE_SPEC = {"materials": [{"id": material, "qualityTier": "reference"} for m
 # The measured baseline: which gates this fixture actually satisfies, with handedness derived from
 # the real surface contract rather than assumed. Recorded as an assertion so a change in what the
 # instrument reports is detectable instead of silent.
-BASELINE_PASSING = {"finiteGeometry", "minimumThicknessMeasured", "provenanceVerified", "runtimeDeterministic", "selfIntersectionFree", "uvMaterialOwnership"}
-BASELINE_FAILING = {"handednessCorrect", "penetrationFree", "topologyReady"}
+BASELINE_PASSING = {"finiteGeometry", "minimumThicknessMeasured", "provenanceVerified", "runtimeDeterministic", "uvMaterialOwnership"}
+# `selfIntersectionFree` moved here from PASSING, and the move is the point of recording the baseline:
+# this fixture's panels are open slabs, and ray parity has no inside to count on an open surface. The
+# probe used to sample vertices and returned a confident "clean" anyway. It now declines, and a concern
+# that could not be measured is not one that passed.
+BASELINE_FAILING = {"handednessCorrect", "penetrationFree", "selfIntersectionFree", "topologyReady"}
 # With handedness and provenance forced true, only the genuinely structural gates still fail.
-STRUCTURAL_FAILING = {"penetrationFree", "topologyReady"}
+STRUCTURAL_FAILING = {"penetrationFree", "selfIntersectionFree", "topologyReady"}
 
 
 def geometry() -> dict:

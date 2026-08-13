@@ -251,15 +251,23 @@ def measure_geometry_integrity(payload: dict[str, Any]) -> dict[str, Any]:
             item["selfIntersection"] = {
                 key: probe[key]
                 for key in (
-                    "selfIntersecting", "insideVertexCount", "undecidedVertexCount",
-                    "sampledVertexCount", "totalVertexCount", "samplingStride",
+                    "selfIntersecting", "insideTriangleCount", "undecidedTriangleCount",
+                    "sampledTriangleCount", "totalTriangleCount", "samplingStride", "analyzed",
                 )
                 if key in probe
             }
-            if probe.get("selfIntersecting"):
+            if not probe.get("analyzed"):
+                # A concern that could not be measured must not read as one that passed. The open-surface
+                # case is already named by boundaryEdges above, so this adds the reason rather than a
+                # second verdict on the same defect.
+                item["selfIntersection"]["unmeasured"] = probe.get("error")
+                message = f"{item['id']}: self-intersection not measured -- {probe.get('error')}"
+                failures.append(message)
+                issues.append({"severity": "error", "code": "self-intersection-unmeasured", "mesh": item["id"], "message": message})
+            elif probe.get("selfIntersecting"):
                 message = (
-                    f"{item['id']}: selfIntersecting, {probe.get('insideVertexCount')} of "
-                    f"{probe.get('sampledVertexCount')} sampled vertices lie inside their own surface"
+                    f"{item['id']}: selfIntersecting, {probe.get('insideTriangleCount')} of "
+                    f"{probe.get('sampledTriangleCount')} sampled faces stand inside their own surface"
                 )
                 failures.append(message)
                 issues.append({"severity": "error", "code": "self-intersection", "mesh": item["id"], "message": message})

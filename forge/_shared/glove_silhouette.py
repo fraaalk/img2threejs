@@ -30,6 +30,10 @@ MIN_COMPONENT_FRACTION = 0.05
 # offset; the gap is 2 * HAND_SEPARATION - 1.
 HAND_SEPARATION = 0.6
 DESCRIPTOR_KIND = "silhouetteInflation"
+# Heights at which the palm-and-cuff outline is measured. Measurement only: how many of these a given
+# descriptor can actually use is decided by the builder, because that depends on the polygonisation grid.
+# Sampled finely here so the builder has something to thin out rather than something to interpolate.
+PROFILE_SLICES = 48
 
 
 def measure_silhouette(reference: Path, grid: int = DEFAULT_GRID) -> tuple[list[list[bool]], dict[str, Any]]:
@@ -89,9 +93,55 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     span_x, span_y = max(1, x1 - x0), max(1, y1 - y0)
     below = [index for index in cells if index // width > y0 + span_y * 0.45]
     left = sum(1 for index in below if index % width < (x0 + x1) / 2)
+    # Row widths locate the knuckle line: the digits occupy everything above the first row that
+    # reaches near-maximum width. It is the one anatomical landmark a pressed-together silhouette
+    # still gives up, since it needs no per-digit separation.
+    rows: dict[int, tuple[int, int]] = {}
+    for index in cells:
+        y, x = index // width, index % width
+        low, high = rows.get(y, (x, x))
+        rows[y] = (min(low, x), max(high, x))
+    widths = {y: (high - low) / span_x for y, (low, high) in rows.items()}
+    peak = max(widths.values())
+    # The knuckle line is the widest row, not the first row within 2% of it. A glove silhouette widens
+    # as a smooth dome, so a near-peak threshold fires wherever noise first brushes it: on the real
+    # Slingshot plate that was 0.373 of the height against a peak at 0.408, and the difference showed up
+    # as fingers a tenth of the hand too short. The widest row is a landmark; a tolerance band is a knob.
+    knuckle = max(widths, key=lambda y: (widths[y], -y))
+    # How wide the four digits actually sit. Sampled halfway down the digit band, which on both plates
+    # in this repository is the last height that still resolves separate digit runs while the thumb has
+    # not yet widened the span: a quarter of the way down the digits are still tapering to their tips and
+    # read 0.62-0.67 of the silhouette, and past two thirds the thumb joins and it reads 0.93-0.96.
+    # Halfway gives 0.82 and 0.74.
+    #
+    # Without any measurement the digit row was a constant 0.86 of the palm width centre-to-centre,
+    # which with the radius prior made it 1.07 palm widths wide -- wider than the palm, so the outer
+    # digits sat off the glove entirely and sampled the plate's background.
+    digit_row = y0 + max(1, int((knuckle - y0) * 0.5))
+    digit_bounds = rows.get(digit_row) or rows[knuckle]
+    # The width of the silhouette at each height below the knuckle line, as a fraction of the widest
+    # row, plus where that row's centre sits. This is the one part of the form the plate really does
+    # observe, and fitting a single ellipsoid to it instead threw it away: on the real Slingshot plate
+    # the palm reads as a trapezoid tapering from 0.97 at the knuckles to 0.66 at the cuff, and an
+    # ellipsoid of palm width by palm height is a circle. A circle wider than the plate's own palm maps
+    # its edges onto whatever lies outside the glove in the plate, which is why parts of the render
+    # sampled background.
+    profile: list[tuple[float, float]] = []
+    for step in range(PROFILE_SLICES):
+        y = knuckle + int((y1 - knuckle) * step / max(1, PROFILE_SLICES - 1))
+        bounds = rows.get(y)
+        if bounds is None:
+            continue
+        width = (bounds[1] - bounds[0] + 1) / span_x
+        centre = ((bounds[0] + bounds[1]) / 2.0 - x0) / span_x - 0.5
+        profile.append((round(width, 6), round(centre, 6)))
     return resampled, {
         "aspect": round(span_x / span_y, 6),
         "thumbSide": "left" if left > len(below) - left else "right",
+        "fingerBandFraction": round((knuckle - y0) / span_y, 6),
+        "fingerSpanFraction": round((digit_bounds[1] - digit_bounds[0] + 1) / span_x, 6),
+        "widthProfile": [list(entry) for entry in profile],
+        "widestRowFraction": round(peak, 6),
         "sourcePixelCount": len(cells),
     }
 

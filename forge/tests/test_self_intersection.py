@@ -111,39 +111,31 @@ class CleanMesh(unittest.TestCase):
         result = analyze_mesh({"name": "icosphere", "vertices": self.vertices, "indices": self.indices})
         self.assertTrue(result["analyzed"], result["error"])
         self.assertFalse(result["selfIntersecting"])
-        self.assertEqual(result["insideVertexCount"], 0)
+        self.assertEqual(result["insideTriangleCount"], 0)
         self.assertEqual(result["worstRegions"], [])
         # Undecided samples are a fact about the ray casts, not a hiding place: on a clean convex
         # sphere they must be a rounding error, not a way to reach a clean verdict by abstention.
-        self.assertLess(result["undecidedVertexCount"], result["sampledVertexCount"] // 20)
+        self.assertLess(result["undecidedTriangleCount"], result["sampledTriangleCount"] // 20)
         self.assertEqual(
-            result["outsideVertexCount"] + result["insideVertexCount"] + result["undecidedVertexCount"],
-            result["sampledVertexCount"],
+            result["outsideTriangleCount"] + result["insideTriangleCount"] + result["undecidedTriangleCount"],
+            result["sampledTriangleCount"],
         )
 
-    def test_supplied_normals_are_used_and_reported(self) -> None:
-        # On a unit sphere the vertex normal is the position, so this is the exact normal set.
-        result = analyze_mesh({
-            "vertices": self.vertices,
-            "indices": self.indices,
-            "normals": [list(vertex) for vertex in self.vertices],
-        })
-        self.assertEqual(result["normalSource"], "vertexNormals")
-        self.assertEqual(result["normalFallbackCount"], 0)
-        self.assertFalse(result["selfIntersecting"])
-
-    def test_centroid_fallback_is_reported_when_normals_absent(self) -> None:
-        result = analyze_mesh({"vertices": self.vertices, "indices": self.indices})
-        self.assertEqual(result["normalSource"], "centroid")
-
-    def test_wrong_length_normals_fall_back_rather_than_trusting_them(self) -> None:
-        result = analyze_mesh({
-            "vertices": self.vertices,
-            "indices": self.indices,
-            "normals": [[0.0, 0.0, 1.0]],
-        })
-        self.assertEqual(result["normalSource"], "centroid")
-        self.assertFalse(result["selfIntersecting"])
+    def test_the_verdict_does_not_depend_on_supplied_normals(self) -> None:
+        """The outward direction is the face's own normal, so a wrong or missing `normals` attribute
+        cannot change the answer. It used to: sampling stepped along the *averaged* vertex normal, which
+        on a locally concave surface points into the material, and every such sample read as inside."""
+        base = {"vertices": self.vertices, "indices": self.indices}
+        verdicts = [
+            analyze_mesh(base),
+            analyze_mesh({**base, "normals": [list(vertex) for vertex in self.vertices]}),
+            analyze_mesh({**base, "normals": [[-value for value in vertex] for vertex in self.vertices]}),
+            analyze_mesh({**base, "normals": [[0.0, 0.0, 1.0]]}),
+        ]
+        for result in verdicts:
+            self.assertEqual(result["normalSource"], "faceNormals")
+            self.assertFalse(result["selfIntersecting"])
+            self.assertEqual(result["insideTriangleCount"], verdicts[0]["insideTriangleCount"])
 
     def test_epsilon_scales_with_the_model(self) -> None:
         big = [[value * 1000.0 for value in vertex] for vertex in self.vertices]
@@ -153,7 +145,7 @@ class CleanMesh(unittest.TestCase):
         # The verdict is the point: an absolute epsilon would be wrong at one of these two scales.
         self.assertFalse(small["selfIntersecting"])
         self.assertFalse(large["selfIntersecting"])
-        self.assertEqual(large["insideVertexCount"], 0)
+        self.assertEqual(large["insideTriangleCount"], 0)
 
 
 class SelfIntersectionRegression(unittest.TestCase):
@@ -168,11 +160,11 @@ class SelfIntersectionRegression(unittest.TestCase):
         result = analyze_mesh({"name": "punched", "vertices": self.broken, "indices": self.indices})
         self.assertTrue(result["analyzed"], result["error"])
         self.assertTrue(result["selfIntersecting"])
-        self.assertGreater(result["insideVertexCount"], 0)
+        self.assertGreater(result["insideTriangleCount"], 0)
         self.assertTrue(result["worstRegions"])
         for region in result["worstRegions"]:
             self.assertEqual(len(region["position"]), 3)
-            self.assertIn("vertexIndex", region)
+            self.assertIn("triangleIndex", region)
 
     def test_topology_gate_passes_the_mesh_this_gate_rejects(self) -> None:
         """The single load-bearing test: same mesh, old gate clean, new gate rejects.
@@ -223,17 +215,19 @@ class ParityIsReal(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.vertices, cls.indices = icosphere(3)
 
-    def test_inverted_normals_put_every_sample_inside(self) -> None:
-        # Flipping the supplied normals steps each sample INWARD instead of outward, so the point
-        # under test is genuinely inside the sphere. Everything must read inside. If crossings were
-        # being missed, this would come back clean and expose the whole gate as vacuous.
+    def test_inverted_winding_puts_every_sample_inside(self) -> None:
+        # Reversing the winding reverses every face normal, so each sample steps INWARD instead of
+        # outward and the point under test is genuinely inside the sphere. Everything must read inside.
+        # If crossings were being missed, this would come back clean and expose the gate as vacuous.
+        # An inside-out mesh is also a real defect in its own right, which flipped `normals` was not:
+        # the probe no longer consults that attribute at all.
+        triangles = [tuple(self.indices[index:index + 3]) for index in range(0, len(self.indices), 3)]
         result = analyze_mesh({
             "vertices": self.vertices,
-            "indices": self.indices,
-            "normals": [[-value for value in vertex] for vertex in self.vertices],
+            "indices": [[a, c, b] for a, b, c in triangles],
         })
         self.assertTrue(result["selfIntersecting"])
-        self.assertGreater(result["insideVertexCount"], result["sampledVertexCount"] * 0.95)
+        self.assertGreater(result["insideTriangleCount"], result["sampledTriangleCount"] * 0.95)
 
     def test_every_vertex_gets_broad_phase_candidates(self) -> None:
         # Regression: the query used to bail out when a point projected one cell past the grid's
@@ -256,9 +250,9 @@ class IndexEncodings(unittest.TestCase):
         grouped = [flat[i:i + 3] for i in range(0, len(flat), 3)]
         first = analyze_mesh({"vertices": vertices, "indices": flat})
         second = analyze_mesh({"vertices": vertices, "indices": grouped})
-        self.assertEqual(first["triangleCount"], second["triangleCount"])
-        self.assertEqual(first["insideVertexCount"], second["insideVertexCount"])
-        self.assertEqual(first["undecidedVertexCount"], second["undecidedVertexCount"])
+        self.assertEqual(first["totalTriangleCount"], second["totalTriangleCount"])
+        self.assertEqual(first["insideTriangleCount"], second["insideTriangleCount"])
+        self.assertEqual(first["undecidedTriangleCount"], second["undecidedTriangleCount"])
         self.assertFalse(first["selfIntersecting"])
 
     def test_both_encodings_catch_the_defect(self) -> None:
@@ -276,27 +270,28 @@ class SamplingHonesty(unittest.TestCase):
 
     def test_full_coverage_is_reported_as_stride_one(self) -> None:
         result = analyze_mesh({"vertices": self.vertices, "indices": self.indices})
-        self.assertLess(len(self.vertices), MAX_SAMPLED_VERTICES)
+        triangles = len(self.indices) // 3
+        self.assertLess(triangles, MAX_SAMPLED_VERTICES)
         self.assertEqual(result["samplingStride"], 1)
-        self.assertEqual(result["sampledVertexCount"], len(self.vertices))
-        self.assertEqual(result["totalVertexCount"], len(self.vertices))
+        self.assertEqual(result["sampledTriangleCount"], triangles)
+        self.assertEqual(result["totalTriangleCount"], triangles)
 
     def test_budget_exceeded_reports_a_real_stride(self) -> None:
         budget = 50
         result = analyze_mesh({"vertices": self.vertices, "indices": self.indices}, max_samples=budget)
-        self.assertGreater(len(self.vertices), budget)
+        self.assertGreater(len(self.indices) // 3, budget)
         self.assertGreater(result["samplingStride"], 1)
-        self.assertLessEqual(result["sampledVertexCount"], budget)
-        self.assertEqual(result["totalVertexCount"], len(self.vertices))
+        self.assertLessEqual(result["sampledTriangleCount"], budget)
+        self.assertEqual(result["totalTriangleCount"], len(self.indices) // 3)
         # The claim that matters: the result never pretends the whole mesh was inspected.
-        self.assertLess(result["sampledVertexCount"], result["totalVertexCount"])
+        self.assertLess(result["sampledTriangleCount"], result["totalTriangleCount"])
 
     def test_sampling_is_deterministic(self) -> None:
         mesh = {"vertices": self.vertices, "indices": self.indices}
         first = analyze_mesh(mesh, max_samples=137)
         second = analyze_mesh(mesh, max_samples=137)
-        self.assertEqual(first["sampledVertexCount"], second["sampledVertexCount"])
-        self.assertEqual(first["insideVertexCount"], second["insideVertexCount"])
+        self.assertEqual(first["sampledTriangleCount"], second["sampledTriangleCount"])
+        self.assertEqual(first["insideTriangleCount"], second["insideTriangleCount"])
         self.assertEqual(first["worstRegions"], second["worstRegions"])
 
 
@@ -416,7 +411,7 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(code, 0)
         parsed = json.loads(output)
         self.assertGreater(parsed["meshes"][0]["samplingStride"], 1)
-        self.assertLessEqual(parsed["meshes"][0]["sampledVertexCount"], 40)
+        self.assertLessEqual(parsed["meshes"][0]["sampledTriangleCount"], 40)
 
 
 class Performance(unittest.TestCase):
@@ -427,9 +422,9 @@ class Performance(unittest.TestCase):
         result = analyze_mesh({"vertices": vertices, "indices": indices})
         elapsed = time.perf_counter() - started
         self.assertFalse(result["selfIntersecting"])
-        self.assertEqual(result["sampledVertexCount"], 2562)
+        self.assertEqual(result["sampledTriangleCount"], 2560)
         print(f"\n  analyze_mesh: {len(indices) // 3} triangles, "
-              f"{result['sampledVertexCount']} samples in {elapsed:.2f}s")
+              f"{result['sampledTriangleCount']} samples in {elapsed:.2f}s")
         # A gate nobody will wait for is a gate nobody will run.
         self.assertLess(elapsed, 60.0)
 

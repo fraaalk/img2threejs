@@ -707,7 +707,7 @@ type SdfPrimitive = {
 type SdfOperation = {
   readonly id?: string;
   readonly output?: string;
-  readonly type: 'smooth-union' | 'subtract' | 'intersect';
+  readonly type: 'union' | 'smooth-union' | 'subtract' | 'intersect';
   readonly left: string;
   readonly right: string;
   readonly radius?: number;
@@ -717,6 +717,11 @@ type SdfDescriptor = {
   readonly operations?: readonly SdfOperation[];
   readonly resolution: number;
   readonly bounds?: { readonly min: SdfVector; readonly max: SdfVector };
+  // Opt-in. An implicit surface has no uvs of its own, so a textured one needs a projection. The only
+  // mode is the two-plate atlas a photographed front/back pair produces: dorsal in u < 0.5, palmar in
+  // u > 0.5. Declaring it makes the geometry unindexed, because which plate saw a triangle is a
+  // property of the triangle and one uv per shared grid corner cannot express it.
+  readonly uvProjection?: { readonly mode: 'atlas-front-back'; readonly flipU?: boolean };
 };
 type SdfFunction = (point: THREE.Vector3) => number;
 
@@ -808,6 +813,9 @@ function sdfSample(descriptor: SdfDescriptor): SdfFunction {
     if (!left || !right) continue;
     let combined: SdfFunction;
     switch (operation.type) {
+      case 'union':
+        combined = (point) => Math.min(left(point), right(point));
+        break;
       case 'smooth-union':
         combined = (point) => smin(left(point), right(point), operation.radius ?? 0.1);
         break;
@@ -824,66 +832,214 @@ function sdfSample(descriptor: SdfDescriptor): SdfFunction {
   return result ?? (() => Infinity);
 }
 
+// The twelve edges of a cell, as pairs of corner indices, where corner i has offsets
+// (i & 1, (i >> 1) & 1, (i >> 2) & 1).
+const SDF_CELL_CORNERS: ReadonlyArray<readonly [number, number, number]> = [
+  [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1],
+];
+const SDF_CELL_EDGES: ReadonlyArray<readonly [number, number]> = [
+  [0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7],
+];
+// One quad per sign-changing grid edge, from the four cells that share it, per edge direction.
+const SDF_EDGE_CELLS: ReadonlyArray<readonly [number, ReadonlyArray<readonly [number, number, number]>]> = [
+  [0, [[0, -1, -1], [0, 0, -1], [0, 0, 0], [0, -1, 0]]],
+  [1, [[-1, 0, -1], [-1, 0, 0], [0, 0, 0], [0, 0, -1]]],
+  [2, [[-1, -1, 0], [0, -1, 0], [0, 0, 0], [-1, 0, 0]]],
+];
+
+// Extracts the zero level set with naive surface nets: one interpolated vertex per crossing cell.
+//
+// It replaces a binary-occupancy extractor that placed every vertex on an integer grid corner. That
+// one threw away all sub-cell position, so the surface was faceted at cell scale however fine the grid;
+// it could not represent a crease where two solids touch without a gap, because every cell either side
+// of such a crease is solid, which made two fingers pressed together come out as a single mitten; and
+// every face being axis-aligned left 35% of triangles with exactly zero uv area under a planar
+// projection, so a whole face sampled one line of texels.
+//
+// Each cell whose eight corners are not all on the same side contributes ONE vertex at the mean of the
+// zero crossings along its edges, and each grid edge that changes sign contributes ONE quad joining the
+// four cells around it. The field is sampled at cell CORNERS, (resolution + 1) cubed of them.
 function polygonizeSdf(descriptor: SdfDescriptor): THREE.BufferGeometry {
   const resolution = Math.max(4, Math.min(64, Math.floor(descriptor.resolution)));
   const defaultBounds: { readonly min: SdfVector; readonly max: SdfVector } = { min: [-2, -2, -2], max: [2, 2, 2] };
   const bounds = descriptor.bounds ?? defaultBounds;
-  const min = new THREE.Vector3(bounds.min[0], bounds.min[1], bounds.min[2]);
-  const step = new THREE.Vector3(
-    (bounds.max[0] - bounds.min[0]) / resolution,
-    (bounds.max[1] - bounds.min[1]) / resolution,
-    (bounds.max[2] - bounds.min[2]) / resolution,
-  );
-  const field = new Float32Array(resolution * resolution * resolution);
+  const min = [bounds.min[0], bounds.min[1], bounds.min[2]];
+  const step = [0, 1, 2].map((axis) => (bounds.max[axis] - min[axis]) / resolution);
   const sample = sdfSample(descriptor);
-  const indexAt = (x: number, y: number, z: number): number => (z * resolution + y) * resolution + x;
-  for (let z = 0; z < resolution; z += 1) {
-    for (let y = 0; y < resolution; y += 1) {
-      for (let x = 0; x < resolution; x += 1) {
-        field[indexAt(x, y, z)] = sample(new THREE.Vector3(
-          min.x + (x + 0.5) * step.x,
-          min.y + (y + 0.5) * step.y,
-          min.z + (z + 0.5) * step.z,
+
+  const side = resolution + 1;
+  const field = new Float64Array(side * side * side);
+  const at = (x: number, y: number, z: number): number => (z * side + y) * side + x;
+  for (let z = 0; z < side; z += 1) {
+    for (let y = 0; y < side; y += 1) {
+      for (let x = 0; x < side; x += 1) {
+        field[at(x, y, z)] = sample(new THREE.Vector3(
+          min[0] + x * step[0],
+          min[1] + y * step[1],
+          min[2] + z * step[2],
         ));
       }
     }
   }
+
   const positions: number[] = [];
-  const indices: number[] = [];
-  const vertices = new Map<string, number>();
-  const vertexAt = (x: number, y: number, z: number): number => {
-    const key = `${x},${y},${z}`;
-    const existing = vertices.get(key);
-    if (existing !== undefined) return existing;
-    const vertex = positions.length / 3;
-    positions.push(min.x + x * step.x, min.y + y * step.y, min.z + z * step.z);
-    vertices.set(key, vertex);
-    return vertex;
-  };
-  const addFace = (a: number, b: number, c: number, d: number): void => {
-    indices.push(a, b, c, a, c, d);
-  };
-  const inside = (x: number, y: number, z: number): boolean => (
-    x >= 0 && y >= 0 && z >= 0 && x < resolution && y < resolution && z < resolution && field[indexAt(x, y, z)] <= 0
-  );
+  const cellVertex = new Map<number, number>();
+  const cellKey = (x: number, y: number, z: number): number => (z * resolution + y) * resolution + x;
+  const values = new Float64Array(8);
+  const inside: boolean[] = new Array(8);
   for (let z = 0; z < resolution; z += 1) {
     for (let y = 0; y < resolution; y += 1) {
       for (let x = 0; x < resolution; x += 1) {
-        if (!inside(x, y, z)) continue;
-        if (!inside(x - 1, y, z)) addFace(vertexAt(x, y, z), vertexAt(x, y, z + 1), vertexAt(x, y + 1, z + 1), vertexAt(x, y + 1, z));
-        if (!inside(x + 1, y, z)) addFace(vertexAt(x + 1, y, z), vertexAt(x + 1, y + 1, z), vertexAt(x + 1, y + 1, z + 1), vertexAt(x + 1, y, z + 1));
-        if (!inside(x, y - 1, z)) addFace(vertexAt(x, y, z), vertexAt(x + 1, y, z), vertexAt(x + 1, y, z + 1), vertexAt(x, y, z + 1));
-        if (!inside(x, y + 1, z)) addFace(vertexAt(x, y + 1, z), vertexAt(x, y + 1, z + 1), vertexAt(x + 1, y + 1, z + 1), vertexAt(x + 1, y + 1, z));
-        if (!inside(x, y, z - 1)) addFace(vertexAt(x, y, z), vertexAt(x, y + 1, z), vertexAt(x + 1, y + 1, z), vertexAt(x + 1, y, z));
-        if (!inside(x, y, z + 1)) addFace(vertexAt(x, y, z + 1), vertexAt(x + 1, y, z + 1), vertexAt(x + 1, y + 1, z + 1), vertexAt(x, y + 1, z + 1));
+        let insideCount = 0;
+        for (let corner = 0; corner < 8; corner += 1) {
+          const offset = SDF_CELL_CORNERS[corner];
+          values[corner] = field[at(x + offset[0], y + offset[1], z + offset[2])];
+          inside[corner] = values[corner] < 0;
+          if (inside[corner]) insideCount += 1;
+        }
+        if (insideCount === 0 || insideCount === 8) continue;
+        const total = [0, 0, 0];
+        let crossings = 0;
+        for (const [first, second] of SDF_CELL_EDGES) {
+          if (inside[first] === inside[second]) continue;
+          const a = values[first];
+          const b = values[second];
+          const t = a / (a - b);
+          for (let axis = 0; axis < 3; axis += 1) {
+            const low = SDF_CELL_CORNERS[first][axis];
+            const high = SDF_CELL_CORNERS[second][axis];
+            total[axis] += low + (high - low) * t;
+          }
+          crossings += 1;
+        }
+        cellVertex.set(cellKey(x, y, z), positions.length / 3);
+        positions.push(
+          min[0] + (x + total[0] / crossings) * step[0],
+          min[1] + (y + total[1] / crossings) * step[1],
+          min[2] + (z + total[2] / crossings) * step[2],
+        );
       }
     }
+  }
+
+  const indices: number[] = [];
+  for (const [axis, offsets] of SDF_EDGE_CELLS) {
+    for (let z = 0; z < side; z += 1) {
+      for (let y = 0; y < side; y += 1) {
+        for (let x = 0; x < side; x += 1) {
+          const head = [x, y, z];
+          head[axis] += 1;
+          if (head[axis] > resolution) continue;
+          const low = field[at(x, y, z)] < 0;
+          const high = field[at(head[0], head[1], head[2])] < 0;
+          if (low === high) continue;
+          const quad: number[] = [];
+          let complete = true;
+          for (const offset of offsets) {
+            const cx = x + offset[0];
+            const cy = y + offset[1];
+            const cz = z + offset[2];
+            if (cx < 0 || cy < 0 || cz < 0 || cx >= resolution || cy >= resolution || cz >= resolution) {
+              complete = false;
+              break;
+            }
+            const vertex = cellVertex.get(cellKey(cx, cy, cz));
+            if (vertex === undefined) {
+              complete = false;
+              break;
+            }
+            quad.push(vertex);
+          }
+          if (!complete) continue;
+          if (!low) quad.reverse();
+          indices.push(quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]);
+        }
+      }
+    }
+  }
+  if (indices.length === 0) {
+    throw new Error('sdf polygonisation produced no geometry; the surface never crosses zero inside its bounds');
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  return geometry;
+  if (!descriptor.uvProjection) return geometry;
+  return projectSdfAtlasUv(geometry, descriptor.uvProjection);
+}
+
+// Splits the surface into an atlas's dorsal and palmar halves and unindexes it, so a polygonised SDF
+// can wear a texture baked from a photographed front/back pair.
+//
+// The side is decided by the *smoothed* normal, not the facet's own. Every face of a voxel mesh is
+// axis-aligned, so on a rounded form most facets point along x or y and carry no z at all: judged by
+// facet, four fifths of the glove armature fell into the dorsal half. The averaged normal is the
+// normal of the surface being approximated, which is what the camera that took the plate faced.
+//
+// Unindexing costs nothing that is measured: `mesh_edge_counts` welds edges by rounded position, so a
+// duplicated position still closes the surface. Assigning per triangle is also what keeps any single
+// triangle out of both halves at once -- one with uvs either side of 0.5 would interpolate its
+// texture straight through the middle of the atlas.
+function projectSdfAtlasUv(
+  source: THREE.BufferGeometry,
+  projection: { readonly mode: 'atlas-front-back'; readonly flipU?: boolean; readonly frame?: { readonly min: readonly [number, number]; readonly max: readonly [number, number] } },
+): THREE.BufferGeometry {
+  const flipU = projection.flipU === true;
+  const sourcePositions = source.getAttribute('position') as THREE.BufferAttribute;
+  const sourceNormals = source.getAttribute('normal') as THREE.BufferAttribute;
+  const index = source.getIndex();
+  if (!index) throw new Error('atlas uv projection needs indexed geometry');
+  source.computeBoundingBox();
+  const box = source.boundingBox as THREE.Box3;
+  // The declared rectangle the plate covers. The mesh's own bounding box is not it: that also holds the
+  // thumb's sideways reach, and mapping the plate onto it puts the print off the form.
+  const lowX = projection.frame ? projection.frame.min[0] : box.min.x;
+  const lowY = projection.frame ? projection.frame.min[1] : box.min.y;
+  const highX = projection.frame ? projection.frame.max[0] : box.max.x;
+  const highY = projection.frame ? projection.frame.max[1] : box.max.y;
+  const spanX = highX - lowX || 1;
+  const spanY = highY - lowY || 1;
+  // Plain planar projection: u from x, v from y, for every face. Three schemes for the faces no plate saw
+  // were measured against this one and none beat it -- the hull edge per row, then per row and column by
+  // dominant axis, then that stepped two cells inward. The striping along the silhouette edge is
+  // foreshortening: there the surface turns away from the plate's own camera, so a projection along that
+  // camera's axis compresses its last texels into a grazing band however u is chosen.
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uv: number[] = [];
+  for (let triangle = 0; triangle < index.count; triangle += 3) {
+    const corners = [index.getX(triangle), index.getX(triangle + 1), index.getX(triangle + 2)];
+    const dorsal = corners.reduce((total, corner) => total + sourceNormals.getZ(corner), 0) >= 0;
+    // Z is not the dominant axis, so the face points around the form rather than at either plate.
+    for (const corner of corners) {
+      const x = sourcePositions.getX(corner);
+      const y = sourcePositions.getY(corner);
+      positions.push(x, y, sourcePositions.getZ(corner));
+      normals.push(sourceNormals.getX(corner), sourceNormals.getY(corner), sourceNormals.getZ(corner));
+      // Clamped here rather than left to the texture's wrap mode: the atlas holds both plates in one
+      // image, so a u past 1.0 in the dorsal half would sample the palmar half instead of the dorsal
+      // plate's dilated edge.
+      let u = Math.min(1, Math.max(0, (x - lowX) / spanX));
+      const v = Math.min(1, Math.max(0, (y - lowY) / spanY));
+      if (flipU) u = 1 - u;
+      uv.push(dorsal ? u * 0.5 : 0.5 + u * 0.5, v);
+    }
+  }
+  const projected = new THREE.BufferGeometry();
+  projected.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  projected.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  projected.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  projected.userData.atlasProjection = {
+    mode: 'orthographic-front-projection',
+    dorsalHalf: [0, 0, 0.5, 1],
+    palmarHalf: [0.5, 0, 0.5, 1],
+    flipU,
+    limitations: [
+      'u and v span the polygonised bounds rather than the cropped plate, so the alignment is close, not exact.',
+      'triangles on the silhouette rim take dorsal texture because no plate observed the rim.',
+    ],
+  };
+  return projected;
 }"""
 
 

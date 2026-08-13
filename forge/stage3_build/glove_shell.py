@@ -220,8 +220,6 @@ def build_hand_shell(
 
 
 ATLAS_SIZE = 1024
-# Texels sampled at the silhouette edge must still be glove, not the plate's background.
-DILATION_STEPS = 12
 
 
 def bake_shell_atlas(dorsal: Path, palmar: Path | None, output: Path) -> dict[str, Any]:
@@ -245,32 +243,35 @@ def bake_shell_atlas(dorsal: Path, palmar: Path | None, output: Path) -> dict[st
         ys = [index // grid_width for index in found[0]]
         with Image.open(path) as source:
             image = source.convert("RGB").copy()
-        # Bleed the glove's own colour outward past the silhouette edge. Without it, a texel sampled
-        # at the boundary averages in the plate's background and the model wears a black fringe --
-        # which is what the rim band's interpolation makes visible at any resolution above the
-        # capture's own.
+        # Crop to the component's own bounding box, never a padded one: uv0 maps the unit square onto
+        # exactly this box, so padding the crop shrinks the texture relative to the geometry and
+        # exposes the very band the fill is meant to remove.
+        box = (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
+        # Flood the glove's own colour into every background texel inside that box, nearest source
+        # first, until none is left. A capped bleed is not enough: a hand does not fill its bounding
+        # box, so 37% of the baked atlas stayed background and 48% of it in the corners. Anything on
+        # the model that maps into those texels -- the outer digits, the thumb, anything clamped to
+        # the frame edge -- rendered as a black hole rather than as leather. This is the
+        # `palette-continue` strategy the surface projection already declares for what no plate saw,
+        # applied rather than approximated: the breadth-first frontier visits each texel once and
+        # takes the colour of the nearest already-coloured one, so the loop ends when the box is full
+        # instead of after a magic number of steps.
         pixels_out = image.load()
-        frontier = occupied
-        for _step in range(DILATION_STEPS):
+        frontier = {index for index in occupied
+                    if box[0] <= index % grid_width < box[2] and box[1] <= index // grid_width < box[3]}
+        filled = set(frontier)
+        while frontier:
             grown: set[int] = set()
             for index in frontier:
                 x, y = index % grid_width, index // grid_width
                 for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-                    if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                    if box[0] <= nx < box[2] and box[1] <= ny < box[3]:
                         neighbour = ny * grid_width + nx
-                        if neighbour not in occupied and neighbour not in grown:
+                        if neighbour not in filled:
+                            filled.add(neighbour)
                             grown.add(neighbour)
                             pixels_out[nx, ny] = pixels_out[x, y]
-            if not grown:
-                break
-            occupied |= grown
             frontier = grown
-        # Crop to the component's own bounding box, never a padded one: uv0 maps the unit square onto
-        # exactly this box, so padding the crop shrinks the texture relative to the geometry and
-        # exposes the very band the dilation was meant to remove. The dilation still earns its keep
-        # inside the box, where a filtered sample near the silhouette would otherwise reach
-        # background.
-        box = (min(xs), min(ys), max(xs) + 1, max(ys) + 1)
         return image.crop(box).resize((ATLAS_SIZE // 2, ATLAS_SIZE), Image.LANCZOS)
 
     atlas = Image.new("RGB", (ATLAS_SIZE, ATLAS_SIZE), (28, 28, 28))
