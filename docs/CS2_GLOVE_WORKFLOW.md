@@ -132,9 +132,11 @@ Scenes have exactly two threshold statuses:
 
 `capture_sanity` runs as a **precondition**, emitting `capture-sanity:<role>:<reason>`. It is never a scored
 metric: a framing or mask-collapse defect is a capture defect, not a model defect. The
-`thumb-side-profile` role is currently **quarantined** — at azimuth 90 the flat panel slabs render edge-on as
-near-zero-width slivers and the foreground mask falls back to whole-frame coverage. That is a stage-3 geometry
-defect, recorded in `quarantinedCaptureRoles` rather than scored.
+`quarantinedCaptureRoles` is empty. `thumb-side-profile` used to be in it: the flat panel slabs of the older
+geometry rendered edge-on at azimuth 90 as near-zero-width slivers and the foreground mask fell back to
+whole-frame coverage. The armature has real depth and that capture now reads a subject fraction of 0.0406
+against a floor of 0.02, in one connected component, so the role is scored again. The mechanism stays, since
+a framing broken by a geometry defect should be recorded rather than charged to the model.
 
 Every missing or invalid input is a named failure with a written report and exit `1`. Exit `2` is reserved for
 conditions that prevent producing a report at all.

@@ -47,11 +47,15 @@ UNMEASURED_CONCERNS: Final[dict[str, str]] = {
     "productionManifold": "production seam welding has not been emitted, so manifoldness cannot be measured",
     "referenceResemblance": "the wearable track makes no claim about resemblance to the reference image; see the glove-reference-conformance follow-up",
 }
-# The azimuth-90 capture renders the flat panel slabs edge-on, collapsing the foreground mask to
-# whole-frame coverage. That is a stage-3 geometry defect, recorded rather than scored.
-QUARANTINED_CAPTURE_ROLES: Final[dict[str, str]] = {
-    "thumb-side-profile": "azimuth-90 render collapses to near-zero-width slivers and the foreground mask falls back to whole-frame; stage-3 geometry defect",
-}
+# Empty, and kept as the mechanism rather than deleted: a capture role whose framing is broken by a
+# geometry defect belongs here, recorded, rather than scored as if the model were at fault.
+#
+# `thumb-side-profile` was quarantined because the flat panel slabs of the old geometry rendered edge-on
+# at azimuth 90 as near-zero-width slivers, and the foreground mask fell back to whole-frame coverage.
+# The armature has real depth, so it no longer does: measured on the real Slingshot artifacts that capture
+# reads a subject fraction of 0.0406 against a floor of 0.02, in one connected component, and passes the
+# precondition. The role is scored again.
+QUARANTINED_CAPTURE_ROLES: Final[dict[str, str]] = {}
 REQUIRED_CAPTURE_ROLES = {"dorsal", "palmar", "thumb-side-profile", "left-three-quarter", "right-three-quarter"}
 REQUIRED_RENDER_ENVIRONMENT = {
     "viewport": [1024, 1024], "devicePixelRatio": 1, "settleFrames": 2,
