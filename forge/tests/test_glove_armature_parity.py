@@ -25,19 +25,19 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "forge" / "stage3_build"))
 
-from forge._shared.glove_armature import build_glove_sdf_descriptor
+from forge._shared.glove_armature import DEFAULT_RESOLUTION, build_glove_sdf_descriptor
 from forge._shared.glove_silhouette import measure_silhouette
 from forge._shared.sdf_mesh import polygonize_sdf, project_atlas_uv
 from forge.stage3_build.generate_threejs_factory import _SDF_HELPER_SOURCE
 from forge.stage4_review.geometry_integrity import mesh_edge_counts
 
 FIXTURE = Path(__file__).parent / "fixtures" / "glove_sport_v1" / "dorsal.png"
-# Small enough for a pure-Python sampler in a test suite, large enough that the digits separate. 24 is not:
-# there the thumb's radius is 1.76 grid cells, under the two the extractor needs, and the mesh comes back with
-# three welded edges -- at the thumb's web and at the index and pinky knuckles. `build_glove_sdf_descriptor`
-# now refuses that grid outright, which is why this is 32. What the test measures is Python against JavaScript,
-# and they agree or disagree independently of how fine the grid is.
-PARITY_RESOLUTION = 32
+# The resolution the pipeline actually ships at, and that is the point rather than a convenience. This was 24,
+# chosen so a pure-Python sampler stays quick, and the choice cost more than it saved: 24 leaves the thumb 1.76
+# grid cells in radius and welds three edges, which `build_glove_sdf_descriptor` now refuses outright, and 48
+# welds one on the fixture while 64 is clean on both plates here. A parity test run at a resolution nothing
+# ships at can only prove Python and JavaScript agree about a mesh nobody sees.
+PARITY_RESOLUTION = DEFAULT_RESOLUTION
 
 
 def _three_module() -> Path | None:

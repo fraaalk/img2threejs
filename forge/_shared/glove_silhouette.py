@@ -127,15 +127,6 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     # ellipsoid of palm width by palm height is a circle. A circle wider than the plate's own palm maps
     # its edges onto whatever lies outside the glove in the plate, which is why parts of the render
     # sampled background.
-    profile: list[tuple[float, float]] = []
-    for step in range(PROFILE_SLICES):
-        y = knuckle + int((y1 - knuckle) * step / max(1, PROFILE_SLICES - 1))
-        bounds = rows.get(y)
-        if bounds is None:
-            continue
-        width = (bounds[1] - bounds[0] + 1) / span_x
-        centre = ((bounds[0] + bounds[1]) / 2.0 - x0) / span_x - 0.5
-        profile.append((round(width, 6), round(centre, 6)))
     # Which side the thumb is on, measured from the OUTLINE rather than from pixel mass. The mass test
     # this replaces -- more foreground left of the bbox midline than right, below 0.45 of the height --
     # is dominated by the palm, and a palm is roughly symmetric: on the real Slingshot plate it answered
@@ -150,6 +141,29 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     }
     areas = {side: sum(max(0, value) for _y, value in entries) for side, entries in reach.items()}
     thumb_side = "left" if areas["left"] > areas["right"] else "right"
+    thumb_left = thumb_side == "left"
+    profile: list[tuple[float, float]] = []
+    palm_profile: list[tuple[float, float]] = []
+    for step in range(PROFILE_SLICES):
+        y = knuckle + int((y1 - knuckle) * step / max(1, PROFILE_SLICES - 1))
+        bounds = rows.get(y)
+        if bounds is None:
+            continue
+        width = (bounds[1] - bounds[0] + 1) / span_x
+        centre = ((bounds[0] + bounds[1]) / 2.0 - x0) / span_x - 0.5
+        profile.append((round(width, 6), round(centre, 6)))
+        # The same row with the THUMB's band taken off, which is the palm on its own. `widthProfile` is the
+        # whole outline, and below the knuckles the outline is palm AND thumb: sweeping the palm across all of
+        # it makes a slab that contains the thumb, which is how this form spent a dozen renders with four
+        # digits and a lobe. The cut is at the four digits' envelope on the thumb side, because that is where
+        # the palm ends and the thumb begins.
+        palm_low = max(bounds[0], digit_bounds[0]) if thumb_left else bounds[0]
+        palm_high = bounds[1] if thumb_left else min(bounds[1], digit_bounds[1])
+        if palm_high > palm_low:
+            palm_profile.append((
+                round((palm_high - palm_low + 1) / span_x, 6),
+                round(((palm_low + palm_high) / 2.0 - x0) / span_x - 0.5, 6),
+            ))
     # Where along the height that reach is real rather than a wobble in the outline. This is the thumb's
     # root: a thumb tucked into the palm is hidden behind the palm for its whole length except where it
     # leaves the hand, so this band is the only part of it a front-axis plate observes at all.
@@ -163,6 +177,7 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
         "fingerBandFraction": round((knuckle - y0) / span_y, 6),
         "fingerSpanFraction": round((digit_bounds[1] - digit_bounds[0] + 1) / span_x, 6),
         "widthProfile": [list(entry) for entry in profile],
+        "palmProfile": [list(entry) for entry in palm_profile],
         "widestRowFraction": round(peak, 6),
         "sourcePixelCount": len(cells),
     }

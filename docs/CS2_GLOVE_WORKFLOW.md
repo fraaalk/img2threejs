@@ -148,11 +148,49 @@ inward. So the two plates correspond through a mirror about *each hand's own cen
 and an azimuth-180 render is not directly comparable to the palmar plate with the hands in their dorsal
 positions.
 
-What is still off, stated rather than left to be discovered: the four fingers come out about 23% slimmer than
-anthropometry, at 0.175 of the palm's width against a real 0.226. The cause is understood — the digit-row
-span is measured halfway up the digits, which is the last height where they resolve apart and also a height
-where they have already tapered — and no correction factor is applied for it, because the span at the knuckles
-is not observable from a plate whose digits merge into the palm there.
+### The palm is not as wide as the outline
+
+Below the knuckles the outline is palm AND thumb, so a palm swept across all of it contains the thumb. That is
+what made the hand read as a slab with a bump on it, and it is also why the fingers looked far too slim: their
+diameter was being compared against the outline's full width rather than the palm's own breadth.
+
+`palmProfile` is the same outline with the thumb's band removed, cut at the four digits' envelope on the thumb
+side. On the real Slingshot plate the palm's breadth is 0.83 of the frame against the outline's 0.97. An
+arithmetic check says the cut is in the right place, and it is the check four earlier attempts at this failed:
+the widest row less the thumb's reach should equal the span the four digits occupy, because the widest row is
+the knuckle line, where the palm is at full breadth and the thumb's lobe adds its reach.
+
+| plate | widest row − thumb reach | four-digit span | apart |
+| --- | --- | --- | --- |
+| Slingshot dorsal | 0.8299 | 0.8322 | 0.3% |
+| fixture dorsal | 0.7652 | 0.7913 | 3.3% |
+| Slingshot **palmar** | 0.7494 | 0.6388 | **17.3%** |
+
+It holds on the dorsal plates and fails on the palmar one, where the hand is cupped and the fingers flexed
+toward the camera so the four-digit span is foreshortened, and the thumb is opposed across the palm rather
+than alongside it. The measurement is therefore used for dorsal-measured geometry and is not claimed beyond
+that.
+
+Measured against the palm's own breadth afterwards, the proportions land where anthropometry puts them: finger
+diameter 0.2085 against 0.226, thumb diameter 0.270 against 0.274. The thumb also splays — its base at the
+palm's edge by the wrist, its tip at the outline's edge — because pinning both ends to the outline left the
+base standing off the narrowed palm as a separate solid.
+
+### The extractor does not guarantee a manifold mesh
+
+Worth knowing before chasing geometry that is not at fault. Naive surface nets places one vertex per cell,
+which cannot represent two surface sheets crossing the same cell, so an edge occasionally ends up shared by
+four triangles. On this armature the count is 0 to 2 out of 10,000–20,000 edges and it tracks the grid's
+PHASE rather than any geometric margin: nudging the bounds by 5% of a cell clears it, thumb radii of 2.5, 2.7,
+3.1, 3.6 and 4.4 cells give 1, 1, 1, 0 and 1 welded edges, and six different digit spacings each moved the weld
+to a different pair of parts instead of removing it. Every one of those meshes was still closed — no boundary
+edges, V − E + F = 2.
+
+At the shipping resolution both plates come out at zero, which is why `productionManifold` still demands zero
+rather than a tolerance. The parity suite now runs at that same resolution instead of a coarser one, because a
+parity test at a resolution nothing ships at can only prove the two implementations agree about a mesh nobody
+sees. The real fix is multiple vertices per cell where a cell's surface has more than one component, which
+would have to land in all three ports at once to keep parity.
 
 ## Review gates
 

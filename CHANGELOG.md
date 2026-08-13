@@ -30,6 +30,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this glove's thumb is tucked against the palm — it would have failed a hand that was correct.
 - `build_glove_sdf_descriptor` refuses a resolution too coarse to carry the thumb rather than emitting a
   welded mesh. At resolution 24 the thumb is 1.76 cells across and the extraction welds three edges.
+- **The palm is swept at the palm's own breadth, not the outline's.** Below the knuckles the outline is palm
+  AND thumb, so the palm swept across all of it contained the thumb — the hand read as a slab with a bump, and
+  the fingers looked 23% slimmer than anthropometry because their diameter was being compared against the
+  outline's full width instead of the palm's. `palmProfile` cuts the thumb's band off at the four digits'
+  envelope, and an arithmetic check places the cut: the widest row less the thumb's reach equals the span the
+  four digits occupy, within 0.3% and 3.3% on the two dorsal plates. Measured against the palm afterwards the
+  proportions land on anthropometry — finger diameter 0.2085 against 0.226, thumb 0.270 against 0.274.
+- The thumb splays, base at the palm's edge by the wrist and tip at the outline's edge. Pinning both ends to
+  the outline left its base standing off the narrowed palm as a separate solid, which a horizontal line
+  through the bottom quarter caught as two solids where a hand has one.
+- The parity suite runs at the resolution the pipeline ships at. It ran at 24, where the thumb is under two
+  grid cells and the mesh welds — a parity test at a resolution nothing ships at can only prove the two
+  implementations agree about a mesh nobody sees.
+
+### Documented
+- Naive surface nets does not guarantee a manifold mesh, recorded in `forge/_shared/sdf_mesh.py` with the
+  evidence, because six geometry changes were spent chasing a defect that was never in the geometry. One
+  vertex per cell cannot represent two surface sheets in one cell; the count is 0–2 out of 10,000–20,000 edges
+  and tracks the grid's phase, not any geometric margin. Every such mesh is still closed with V − E + F = 2.
+  The fix is multi-vertex dual contouring in all three ports at once.
 
 ### Changed
 - **BREAKING** — the SDF extractor is naive surface nets, not binary voxel occupancy. Every vertex is now

@@ -142,15 +142,34 @@ def build_glove_sdf_descriptor(
     # view is the dorsal plate, which is what makes this readable at all -- a palmar view would invert it.
     observed_hand = "right" if thumb_side == "left" else "left"
     mirror = 1.0 if hand == observed_hand else -1.0
-    # The outline is normalised to unit height, so palm width follows from the measured aspect.
-    palm_width = aspect
+    # The outline is normalised to unit height, so the hand's full width follows from the measured aspect.
+    # That width is NOT the palm's, though, and conflating the two is what made the hand read as a slab with a
+    # bump: below the knuckles the outline is palm AND thumb, so the palm swept across all of it contained the
+    # thumb. `palmProfile` is the same outline with the thumb's band removed, and its widest row is the palm's
+    # own breadth -- 0.83 of the frame on the real Slingshot plate against the outline's 0.97.
+    #
+    # An arithmetic check says the split is in the right place, and it is the check four earlier attempts at
+    # this failed: the outline's widest row less the thumb's reach should equal the span the four digits
+    # actually occupy, because the widest row is the knuckle line, where the palm is at full breadth and the
+    # thumb's lobe adds its reach. On the two dorsal plates here that lands within 0.3% and 3.3%. It is 17%
+    # out on the PALMAR plate, where the thumb is splayed and fully visible rather than alongside, so this
+    # holds for dorsal-measured geometry and is not claimed beyond it.
+    hand_width = aspect
+    palm_profile = [(width, centre) for width, centre in
+                    (tuple(entry) for entry in measured.get("palmProfile") or [])
+                    if width >= MIN_PROFILE_SLICE_WIDTH]
+    palm_width = max((width for width, _centre in palm_profile), default=1.0) * aspect
+    # Depth and the thumb's own radius are fractions of the PALM's breadth, not of the outline's width. Taken
+    # against the outline the thumb came out at 0.083 where anthropometry wants 0.070 -- 19% too fat, and it
+    # rendered as a lump. Reported against the outline the four fingers also looked 23% slimmer than
+    # anthropometry when against the palm they are 7% under.
     palm_depth = PALM_DEPTH_RATIO * palm_width
     finger_length = finger_band * 1.0
     # The digit row's width is measured, so the digit radius follows from it rather than from a ratio:
     # four digits packed edge to edge across the measured span, which is what the reference shows. The
     # ratio prior is the fallback for a silhouette that could not supply the span, and it was wrong on
     # the real plate by enough to push the outer digits off the glove.
-    digit_row_width = float(measured["fingerSpanFraction"]) * palm_width
+    digit_row_width = float(measured["fingerSpanFraction"]) * hand_width
     if digit_row_width <= 0.0:
         raise ValueError("the silhouette measured a digit row of zero width; there is nothing to place digits across")
     # Four diameters and three gaps fill the measured row, with each gap a fixed number of cells. The cell
@@ -180,9 +199,7 @@ def build_glove_sdf_descriptor(
     #
     # Width and centre per slice are OBSERVED. Depth is not: it is the palm-depth prior, scaled by each
     # slice's own width so a narrow slice is also shallow rather than a wide disc on edge.
-    profile = [(width, centre) for width, centre in
-               (tuple(entry) for entry in measured.get("widthProfile") or [])
-               if width >= MIN_PROFILE_SLICE_WIDTH]
+    profile = palm_profile
     if len(profile) < 2:
         raise ValueError(
             f"the silhouette supplied {len(profile)} usable outline slices below the knuckle line; "
@@ -278,7 +295,15 @@ def build_glove_sdf_descriptor(
     # derived from the segment rather than chosen -- a pair of Euler priors cannot express "clear of the palm"
     # at all, since where the palmar surface sits depends on the palm's depth.
     root = measured.get("thumbRootFraction") or list(THUMB_ROOT_FALLBACK)
-    thumb_x = mirror * thumb_direction * (palm_width / 2.0 - thumb_radius)
+    # The thumb SPLAYS: its base sits at the palm's own edge where the wrist is, and only its tip reaches the
+    # outline's edge. Pinning both ends to the outline left the base standing off the narrowed palm with a real
+    # gap between them -- a horizontal line through the bottom quarter crossed two solids instead of one, which
+    # is a thumb detached from the hand. Anatomy agrees with the fix rather than merely permitting it: the
+    # thumb's metacarpal starts inside the hand's width at the wrist and abducts outward going distal.
+    wrist_width, wrist_centre = palm_profile[-1]
+    wrist_edge = abs(wrist_centre) * aspect + wrist_width * aspect / 2.0
+    base_x = mirror * thumb_direction * max(0.0, wrist_edge - thumb_radius)
+    tip_x = mirror * thumb_direction * (hand_width / 2.0 - thumb_radius)
     # The TIP height comes from the lobe, the BASE from the wrist, and the asymmetry is not a shortcut. The
     # lobe is where the outline reaches past the four digits' envelope, and that test fails at both ends for
     # opposite reasons: near the knuckles the hand is wider than the tapered fingers so the lobe starts too
@@ -292,8 +317,8 @@ def build_glove_sdf_descriptor(
     # real hand, and it is also the only numerically safe end: tangency is a near-touch, the gap it leaves runs
     # under one grid cell, and the extractor welds the two surfaces there. Measured on the fixture, a tangent
     # base put two non-manifold edges between `thumb-digit` and `palm-slice-10` at the wrist.
-    proximal = (thumb_x, -0.5 + thumb_radius, 0.0)
-    distal = (thumb_x, 0.5 - min(root), -(palm_depth / 2.0 + thumb_radius))
+    proximal = (base_x, -0.5 + thumb_radius, 0.0)
+    distal = (tip_x, 0.5 - min(root), -(palm_depth / 2.0 + thumb_radius))
     span_vector = [distal[axis] - proximal[axis] for axis in range(3)]
     reach = math.sqrt(sum(value * value for value in span_vector))
     if reach <= 2.0 * thumb_radius:

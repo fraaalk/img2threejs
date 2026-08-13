@@ -174,6 +174,18 @@ _CELL_EDGES = tuple(
 )
 
 
+# Naive surface nets does NOT guarantee a manifold mesh, and knowing that saves chasing the geometry when it
+# is not the geometry. One vertex per cell cannot represent two surface sheets crossing the same cell, so an
+# edge occasionally ends up shared by four triangles instead of two. Measured on this repository's glove
+# armature the count is 0 to 2 out of 10,000-20,000 edges and it moves with the GRID'S PHASE, not with any
+# geometric margin: nudging the bounds by 5% of a cell clears it, thumb radii of 2.5, 2.7, 3.1, 3.6 and 4.4
+# cells give 1, 1, 1, 0 and 1, and six different digit spacings -- gaps of 1.5, 2 and 3 cells, overlaps of 1,
+# 1.5 and 2 -- each moved the weld to a different pair of parts rather than removing it. Every one of those
+# meshes was still closed (no boundary edges) with V - E + F = 2.
+#
+# The real fix is multiple vertices per cell where the cell's surface has more than one component, which is
+# what manifold dual contouring does. It would have to land in all three ports at once to keep parity, and it
+# changes every mesh this repository emits, so it is not a side change.
 def polygonize_sdf(descriptor: dict[str, Any]) -> dict[str, Any]:
     """Extract the zero level set with naive surface nets: one interpolated vertex per crossing cell.
 
