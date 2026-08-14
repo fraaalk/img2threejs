@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.147 of the height — which orders them middle, index, ring, little with no anthropometric prior consulted.
   The even spread also took 16% off every finger, solving `4 * diameter + 3 * gap = span` with the gap fixed
   in grid cells and leaving each digit 0.175 of the frame where the plate says 0.20 to 0.23.
+- **The digits taper, and that is what lets them separate.** Modelled as cylinders of their widest section
+  the four fingers fused into a mitten, because the gap between two neighbours AT THEIR WIDEST is 0.1 to 0.9
+  of a grid cell — sub-cell, and unrepresentable. A fifth of the way down from the tips the same gap is 2.1
+  to 3.1 cells. Each digit is now two segments, a wide proximal one that merges with its neighbours at the
+  web and a narrower distal one that stands clear, both measured from the plate. The digits now read as four
+  separate fingers from 0.15 of the height down to the knuckle line, which is what the item's own 3D model
+  shows.
 - Adjacent digits are blended across their seam rather than held apart by an air gap. The plate measures
   0.0036 of the frame between neighbouring digits — a fifth of a grid cell, because on a sewn glove the
   digits touch and what shows is a seam. A fifth of a cell is the one width a grid extractor cannot carry:

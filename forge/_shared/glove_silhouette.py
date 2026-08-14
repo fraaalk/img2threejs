@@ -40,6 +40,9 @@ THUMB_REACH_FRACTION = 0.02
 # A run narrower than this is a wobble in the outline, not a digit.
 MIN_DIGIT_RUN_FRACTION = 0.015
 DIGIT_TRACKS = 4
+# The narrowest a digit's distal section may read relative to its base. Below this the reading is the tip's
+# own rounding rather than the digit's width.
+MIN_TIP_WIDTH_RATIO = 0.65
 
 
 def measure_silhouette(reference: Path, grid: int = DEFAULT_GRID) -> tuple[list[list[bool]], dict[str, Any]]:
@@ -243,9 +246,10 @@ def _digit_tracks(
                 if run[1] - run[0] > owners[0]["width"]:
                     owners[0]["width"] = run[1] - run[0]
                     owners[0]["centre"] = (run[0] + run[1]) / 2.0
+                owners[0]["widths"].append(run[1] - run[0])
                 next_active.append(owners[0])
             else:
-                next_active.append({"tip": y, "last": run, "rows": 1,
+                next_active.append({"tip": y, "last": run, "rows": 1, "widths": [run[1] - run[0]],
                                     "width": run[1] - run[0], "centre": (run[0] + run[1]) / 2.0})
         finished.extend(track for track in active if track not in next_active and track not in finished)
         active, merged = next_active, next_merged
@@ -258,6 +262,23 @@ def _digit_tracks(
         {
             "centre": round((track["centre"] - x0) / span_x - 0.5, 6),
             "width": round((track["width"] + 1) / span_x, 6),
+            # The width HALFWAY down the digit's own visible length. A digit TAPERS, and that is not a
+            # detail: the
+            # gap between two neighbours is 0.1 to 0.9 of a grid cell at their widest, which is sub-cell and
+            # unrepresentable, and 2.1 to 3.1 cells near their tips, which the grid carries easily. Modelled
+            # as one cylinder of the widest section a hand fuses into a mitten; tapered, it separates where
+            # the reference separates and merges where the reference merges.
+            #
+            # Floored at a fraction of the base, because a fifth of the way down is measured against each
+            # digit's OWN tracked length and the little finger's track is a seventh as long as the middle
+            # finger's: a fifth down it is still inside the tip's rounding, reading 0.057 of the frame against
+            # a base of 0.128, and the digit rendered as a needle. Sampling at the halfway point instead cured
+            # the needle and cost the separation -- the distal halves grew wide enough to touch at some heights
+            # and not others, which put a tunnel through the hand and took V - E + F from 2 to 0.
+            "tipWidth": round(max(
+                track["widths"][max(0, min(len(track["widths"]) - 1, len(track["widths"]) // 5))] + 1,
+                MIN_TIP_WIDTH_RATIO * (track["width"] + 1),
+            ) / span_x, 6),
             "tipFraction": round((track["tip"] - y0) / span_y, 6),
         }
         for track in sorted(digits, key=lambda track: track["centre"])

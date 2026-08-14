@@ -190,6 +190,7 @@ def build_glove_sdf_descriptor(
         raise ValueError("the silhouette measured a digit row of zero width; there is nothing to place digits across")
     if len(runs) == len(DIGITS):
         radii = [float(entry["width"]) * hand_width / 2.0 for entry in runs]
+        tip_radii = [float(entry.get("tipWidth") or entry["width"]) * hand_width / 2.0 for entry in runs]
         centres = [float(entry["centre"]) * hand_width for entry in runs]
         tips = [0.5 - float(entry["tipFraction"]) for entry in runs]
     else:
@@ -209,6 +210,7 @@ def build_glove_sdf_descriptor(
         digit_gap = cells_per_gap * (1.0 + BOUNDS_MARGIN_RADII * diameter)
         step = diameter + digit_gap
         radii = [diameter / 2.0 * (0.86 if index == len(DIGITS) - 1 else 1.0) for index in range(len(DIGITS))]
+        tip_radii = list(radii)
         centres = [(index - (len(DIGITS) - 1) / 2.0) * step for index in range(len(DIGITS))]
         tips = [0.5 - finger_band * (1.0 - DIGIT_LENGTH[digit]) for digit in DIGITS]
     diameter = 2.0 * max(radii)
@@ -289,24 +291,31 @@ def build_glove_sdf_descriptor(
     ordered = list(DIGITS) if thumb_direction < 0.0 else list(reversed(DIGITS))
     for index, digit in enumerate(ordered):
         radius = radii[index]
-        # The capsule's axis runs from the knuckle line to one radius short of the measured tip, so its far
-        # cap lands ON the tip and its near cap sits a diameter inside the palm, which is the knuckle.
-        top_axis = tips[index] - radius
-        base_axis = palm_top - radius
-        length = top_axis - base_axis
-        if length <= 0.0:
+        tip_radius = tip_radii[index]
+        # TWO segments per digit, because a digit tapers and the taper is what lets neighbours separate.
+        # Measured on the real plate the gap between two digits at their WIDEST is 0.1 to 0.9 of a grid cell
+        # -- sub-cell, unrepresentable, and the reason a row of equal cylinders fused into a mitten -- while a
+        # fifth of the way down from the tips it is 2.1 to 3.1 cells, which the grid carries without trouble.
+        # So the proximal halves overlap and merge, which is the web, and the distal halves stand apart, which
+        # is what both plates and the item's own 3D model show.
+        if tips[index] - palm_top <= 0.0:
             raise ValueError(
                 f"the {digit} digit's measured tip at {tips[index]:.4f} is at or below the knuckle line "
                 f"{palm_top:.4f}; the plate did not resolve a digit there"
             )
-        primitives.append(_capsule(
-            f"{digit}-digit",
-            radius=radius,
-            height=length,
-            translation=[mirror * centres[index], (base_axis + top_axis) / 2.0, 0.0],
-            # Fingers curl slightly forward, which is what a worn glove does at rest.
-            rotation=[math.radians(-9.0), 0.0, 0.0],
-        ))
+        middle = (palm_top + tips[index]) / 2.0
+        for part, part_radius, low, high in (
+            ("", radius, palm_top - radius, middle),
+            ("-tip", tip_radius, middle - tip_radius, tips[index] - tip_radius),
+        ):
+            primitives.append(_capsule(
+                f"{digit}-digit{part}",
+                radius=part_radius,
+                height=max(high - low, part_radius),
+                translation=[mirror * centres[index], (low + max(high, low + part_radius)) / 2.0, 0.0],
+                # Fingers curl slightly forward, which is what a worn glove does at rest.
+                rotation=[math.radians(-9.0), 0.0, 0.0],
+            ))
     thumb_radius = THUMB_RADIUS_RATIO * palm_width
     # The thumb runs ALONGSIDE the palm on the thumb side, rotated onto the palmar side of it -- which is why
     # the dorsal plate barely shows it and the palmar plate shows a whole digit. Both readings have to hold at
@@ -410,7 +419,11 @@ def build_glove_sdf_descriptor(
     # and the extracted mesh spanned 0.703 -- a silhouette 14% wider than the plate's own, from the blend
     # alone. With a cell of real overlap the crease a hard union leaves is finer than the grid can express.
     palm = combine("palm-sweep", slice_ids, "union") if len(slice_ids) > 1 else slice_ids[0]
-    digits = combine("digit-row", [f"{digit}-digit" for digit in DIGITS], "smooth-union", DIGIT_BLEND_CELLS * cell)
+    # Each digit's own two segments are blended into one tapered digit; the digits are then hard-unioned to
+    # each other so the gap between them stays a gap.
+    digit_ids = [combine(f"{digit}-taper", [f"{digit}-digit", f"{digit}-digit-tip"], "smooth-union", tip_radii[0] * 0.5)
+                 for digit in DIGITS]
+    digits = combine("digit-row", digit_ids, "union")
     hand = combine("knuckles", [palm, digits], "smooth-union", fillet)
     # The thumb web is a broad transition on a real hand, and it has to be broad here for a second
     # reason: a fillet narrower than the gap between the thumb and the palm leaves them nearly-touching
