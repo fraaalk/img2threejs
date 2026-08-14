@@ -73,26 +73,24 @@ class GloveArmatureFormTests(unittest.TestCase):
         y = self.low[1] + (self.high[1] - self.low[1]) * fraction
         return _solid_runs(self.sdf, (self.low[0], y, 0.0), (self.high[0], y, 0.0))
 
-    def test_four_digits_are_separate(self):
-        """The digits must read as four across a contiguous stretch of the band, not at odd heights.
+    def test_the_digits_separate_from_their_tips_downward(self):
+        """The digits must part toward their tips and merge toward the palm, which is what the plate shows.
 
-        Swept rather than checked at fixed heights, because the digits have different lengths: above the
-        pinky's tip a line legitimately crosses three, and a plate with a different band fraction puts
-        that boundary somewhere else.
+        This asserted eight consecutive heights crossing four separate solids, which suited digits placed
+        evenly with an air gap between them and does not survive digits measured off the plate. The reference
+        silhouette itself only resolves four separate runs across about one row in seventy-two: the little
+        finger starts a seventh of the way down, and the others have merged again by a quarter. Demanding
+        eight would demand a hand the reference is not.
 
-        The assertion is the length of the longest *contiguous* stretch, and that is deliberate. A test
-        that only asked whether four ever appears would be vacuous: the fused build still produces an
-        isolated four wherever the mitten's own outline happens to dip. Measured across both plates in
-        this repository, a fused build reaches 2-3 consecutive samples and a separated one reaches
-        14-16, so eight has wide margin either side.
+        What must hold is the SHAPE of the sequence -- one run at the top where only the longest digit reaches,
+        rising to four, then falling as they merge into the hand -- and that it never exceeds four, since a
+        fifth run in the digit band would be a stray solid.
         """
         counts = [len(self._at_height(0.58 + 0.016 * step)) for step in range(SWEEP_SAMPLES)]
-        longest = current = 0
-        for count in counts:
-            current = current + 1 if count == len(DIGITS) else 0
-            longest = max(longest, current)
-        self.assertGreaterEqual(longest, MIN_SEPARATED_SWEEP, f"runs by height: {counts}")
-        self.assertLessEqual(max(counts), len(DIGITS), f"runs by height: {counts}")
+        self.assertEqual(max(counts), len(DIGITS), f"runs by height: {counts}")
+        peak = max(range(len(counts)), key=lambda index: counts[index])
+        self.assertTrue(all(counts[i] <= counts[i + 1] for i in range(peak)), f"runs by height: {counts}")
+        self.assertTrue(all(counts[i] >= counts[i + 1] for i in range(peak, len(counts) - 1)), f"runs by height: {counts}")
 
     def test_the_digits_join_the_palm_below_the_knuckles(self):
         """Separate all the way down would be four detached rods, which is the opposite defect.
@@ -118,28 +116,33 @@ class GloveArmatureFormTests(unittest.TestCase):
                 return fraction
         raise AssertionError("no sampled height crosses all four digits")
 
-    def test_the_grooves_are_wide_enough_to_survive_polygonisation(self):
-        """A groove thinner than a grid cell cannot be extracted, so the render would fuse the digits
-        even though the field separates them. The gate is the cell size the descriptor itself declares."""
-        cell = (self.high[0] - self.low[0]) / self.body["resolution"]
+    def test_the_seam_between_digits_is_a_crease_not_a_fusion(self):
+        """Adjacent digits touch, so what separates them is a crease -- and the crease has to be there.
+
+        This replaces a test that asserted three air gaps each wider than a grid cell. That was the right
+        assertion for digits placed evenly with a gap solved in cells, and the wrong one for digits measured
+        off the plate: the plate puts neighbouring digits 0.0036 of the frame apart, a fifth of a cell, because
+        on a sewn glove they touch. Left as an air gap that width the extractor welded seven edges and broke
+        the surface's genus; blended, it is one surface with a seam.
+
+        The seam is measured as a dip in DEPTH: between two digit centres the solid is thinner than it is at
+        either centre. A fusion has no such dip, which is the mitten this whole track has been avoiding.
+        """
+        centres = sorted(
+            (item["transform"]["translation"][0], item["radius"])
+            for item in self.body["primitives"] if item["id"].endswith("-digit") and item["id"] != "thumb-digit"
+        )
         y = self.low[1] + (self.high[1] - self.low[1]) * self._height_with_all_digits()
-        samples = LINE_SAMPLES
-        step = (self.high[0] - self.low[0]) / (samples - 1)
-        gaps: list[float] = []
-        current = 0
-        started = False
-        for index in range(samples):
-            solid = self.sdf((self.low[0] + step * index, y, 0.0)) < 0.0
-            if solid:
-                if started and current:
-                    gaps.append(current * step)
-                started = True
-                current = 0
-            elif started:
-                current += 1
-        self.assertEqual(len(gaps), len(DIGITS) - 1, f"gaps {gaps}")
-        for gap in gaps:
-            self.assertGreater(gap, cell, f"groove {gap:.4f} is under one grid cell {cell:.4f}")
+
+        def thickness(x: float) -> float:
+            runs = _solid_runs(self.sdf, (x, y, self.low[2]), (x, y, self.high[2]))
+            return max(runs) if runs else 0.0
+
+        for (left, _left_radius), (right, _right_radius) in zip(centres, centres[1:]):
+            with self.subTest(seam=(round(left, 4), round(right, 4))):
+                at_seam = thickness((left + right) / 2.0)
+                self.assertGreater(thickness(left), at_seam, "no crease between two digits")
+                self.assertGreater(thickness(right), at_seam, "no crease between two digits")
 
     def test_the_thumb_leaves_the_plane_of_the_fingers(self):
         """A thumb is opposed. An inflated silhouette cannot do this, and it is the single most visible
@@ -162,25 +165,24 @@ class GloveArmatureFormTests(unittest.TestCase):
         self.assertNotEqual(thumb["transform"]["rotation"][1], 0.0)
 
     def test_digits_are_round_in_cross_section(self):
-        """Depth against width for one digit. The inflation measured 0.13-0.18 here."""
-        fraction = self._height_with_all_digits()
-        y = self.low[1] + (self.high[1] - self.low[1]) * fraction
-        runs = self._at_height(fraction)
-        self.assertEqual(len(runs), len(DIGITS))
-        # Walk in from the outside to find the middle of the first digit, then measure through it in z.
-        step = (self.high[0] - self.low[0]) / (LINE_SAMPLES - 1)
-        first_start = None
-        for index in range(LINE_SAMPLES):
-            if self.sdf((self.low[0] + step * index, y, 0.0)) < 0.0:
-                first_start = index
-                break
-        self.assertIsNotNone(first_start)
-        centre_x = self.low[0] + step * (first_start + runs[0] / (2.0 * step))
-        depth_runs = _solid_runs(self.sdf, (centre_x, y, self.low[2]), (centre_x, y, self.high[2]))
-        self.assertTrue(depth_runs)
-        ratio = max(depth_runs) / runs[0]
-        self.assertGreater(ratio, 0.7, f"digit is {ratio:.2f} as deep as it is wide; a finger is about 1")
-        self.assertLess(ratio, 1.5, f"digit is {ratio:.2f} as deep as it is wide; a finger is about 1")
+        """Depth against width for each digit. The inflation measured 0.13-0.18 here, where a finger is 1.
+
+        Measured through each digit's OWN centre, taken from the primitive, rather than through the centre of
+        whatever the first solid run at that height happens to be. Once the digits are blended at their seams,
+        the first run is no longer one digit, so that reading straddled a seam and reported a digit 1.63 times
+        as deep as it was wide.
+        """
+        y = self.low[1] + (self.high[1] - self.low[1]) * self._height_with_all_digits()
+        for item in self.body["primitives"]:
+            if not item["id"].endswith("-digit") or item["id"] == "thumb-digit":
+                continue
+            x = item["transform"]["translation"][0]
+            with self.subTest(digit=item["id"]):
+                depth = _solid_runs(self.sdf, (x, y, self.low[2]), (x, y, self.high[2]))
+                self.assertTrue(depth, f"{item['id']} has no solid at its own centre")
+                ratio = max(depth) / (2.0 * item["radius"])
+                self.assertGreater(ratio, 0.7, f"{item['id']} is {ratio:.2f} as deep as it is wide")
+                self.assertLess(ratio, 1.5, f"{item['id']} is {ratio:.2f} as deep as it is wide")
 
     def test_all_five_digits_stand_clear_of_the_rest_of_the_hand(self):
         """A glove has five digits, and four of them being obvious does not make the fifth exist.

@@ -44,6 +44,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grid cells and the mesh welds — a parity test at a resolution nothing ships at can only prove the two
   implementations agree about a mesh nobody sees.
 
+- **Each digit is measured, not assumed.** The four fingers were four equal cylinders spread evenly across
+  one measured span; the plate carries each digit's own width, centre and tip, and the assumption was wrong in
+  all three ways at once. On the real Slingshot plate the digits are 0.226, 0.228, 0.204 and 0.129 of the
+  frame wide, their centres are 0.233, 0.226 and 0.168 apart, and their tips sit at 0.036, 0.000, 0.062 and
+  0.147 of the height — which orders them middle, index, ring, little with no anthropometric prior consulted.
+  The even spread also took 16% off every finger, solving `4 * diameter + 3 * gap = span` with the gap fixed
+  in grid cells and leaving each digit 0.175 of the frame where the plate says 0.20 to 0.23.
+- Adjacent digits are blended across their seam rather than held apart by an air gap. The plate measures
+  0.0036 of the frame between neighbouring digits — a fifth of a grid cell, because on a sewn glove the
+  digits touch and what shows is a seam. A fifth of a cell is the one width a grid extractor cannot carry:
+  left as measured it welded seven edges on the fixture and broke the surface's genus, V − E + F coming out
+  at 0 rather than 2.
+
 ### Documented
 - Naive surface nets does not guarantee a manifold mesh, recorded in `forge/_shared/sdf_mesh.py` with the
   evidence, because six geometry changes were spent chasing a defect that was never in the geometry. One

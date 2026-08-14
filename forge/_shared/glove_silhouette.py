@@ -37,6 +37,9 @@ PROFILE_SLICES = 48
 # How far past the digits' envelope the outline has to reach before that row counts as the thumb's root
 # rather than a wobble in the silhouette's edge.
 THUMB_REACH_FRACTION = 0.02
+# A run narrower than this is a wobble in the outline, not a digit.
+MIN_DIGIT_RUN_FRACTION = 0.015
+DIGIT_TRACKS = 4
 
 
 def measure_silhouette(reference: Path, grid: int = DEFAULT_GRID) -> tuple[list[list[bool]], dict[str, Any]]:
@@ -82,6 +85,10 @@ def _components(mask: list[bool], width: int, height: int) -> list[list[int]]:
     return sorted(found, key=len, reverse=True)
 
 def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]], dict[str, Any]]:
+    # The profile loop below rebinds `width` to a fraction of the span, so the image's own width is kept
+    # here. It is not a style point: passing the rebound name to the digit tracker fed it a float where it
+    # wanted a row stride, every index missed, and the tracker returned no digits at all rather than failing.
+    image_width = width
     xs = [index % width for index in cells]
     ys = [index // width for index in cells]
     x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
@@ -178,9 +185,84 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
         "fingerSpanFraction": round((digit_bounds[1] - digit_bounds[0] + 1) / span_x, 6),
         "widthProfile": [list(entry) for entry in profile],
         "palmProfile": [list(entry) for entry in palm_profile],
+        "digitRuns": _digit_tracks(occupied, image_width, x0, x1, y0, y1, span_x, span_y),
         "widestRowFraction": round(peak, 6),
         "sourcePixelCount": len(cells),
     }
+
+def _digit_tracks(
+    occupied: set[int], width: int, x0: int, x1: int, y0: int, y1: int, span_x: int, span_y: int
+) -> list[dict[str, float]]:
+    """Follow each digit down from its own tip, and stop it where it merges into its neighbour.
+
+    This is what replaces "four digits evenly spaced across the measured row, all the same width". That
+    assumption was wrong in three ways at once on the real plate, and the plate says so plainly: the digits
+    measure 0.226, 0.228, 0.204 and 0.129 of the frame rather than one width, their centres are 0.233, 0.226
+    and 0.168 apart rather than evenly, and their tips are at 0.036, 0.000, 0.062 and 0.147 of the height,
+    which orders them middle, index, ring, little without any anthropometric prior being consulted.
+
+    A single row cannot supply this. Read at one height the digits are either not all present yet -- the
+    little finger starts a seventh of the way down -- or already merging, and picking the lowest row with
+    four runs lands in the merge, where one "run" 0.44 of the frame wide is two digits at once. Following
+    each run from its tip and ending it at the merge measures each digit where that digit is actually
+    separate.
+    """
+    minimum = max(2, round(span_x * MIN_DIGIT_RUN_FRACTION))
+
+    def runs_at(y: int) -> list[tuple[int, int]]:
+        found: list[list[int]] = []
+        for x in range(x0, x1 + 1):
+            if y * width + x not in occupied:
+                continue
+            if found and x == found[-1][1] + 1:
+                found[-1][1] = x
+            else:
+                found.append([x, x])
+        return [(low, high) for low, high in found if high - low + 1 >= minimum]
+
+    def touching(a: tuple[int, int], b: tuple[int, int]) -> bool:
+        return not (a[1] < b[0] or a[0] > b[1])
+
+    finished: list[dict[str, Any]] = []
+    active: list[dict[str, Any]] = []
+    # Merged runs have to be remembered from row to row. Without that the run left over after two digits
+    # merge belongs to no track, starts a fresh one, and that track is the merged mass -- which is how a
+    # "digit" 0.97 of the frame wide got measured.
+    merged: list[tuple[int, int]] = []
+    for y in range(y0, y1 + 1):
+        next_active: list[dict[str, Any]] = []
+        next_merged: list[tuple[int, int]] = []
+        for run in runs_at(y):
+            owners = [track for track in active if touching(run, track["last"])]
+            if len(owners) > 1 or any(touching(run, block) for block in merged):
+                finished.extend(owners)
+                next_merged.append(run)
+            elif owners:
+                owners[0]["last"] = run
+                owners[0]["rows"] += 1
+                if run[1] - run[0] > owners[0]["width"]:
+                    owners[0]["width"] = run[1] - run[0]
+                    owners[0]["centre"] = (run[0] + run[1]) / 2.0
+                next_active.append(owners[0])
+            else:
+                next_active.append({"tip": y, "last": run, "rows": 1,
+                                    "width": run[1] - run[0], "centre": (run[0] + run[1]) / 2.0})
+        finished.extend(track for track in active if track not in next_active and track not in finished)
+        active, merged = next_active, next_merged
+    finished.extend(active)
+    # The four highest tips. A plate can yield a fifth track -- on the fixture the thumb's lobe reads as one,
+    # starting at 0.49 of the height against 0.005 to 0.124 for the digits -- and the digits are the ones that
+    # reach the top of the frame.
+    digits = sorted(finished, key=lambda track: (track["tip"], -track["rows"]))[:DIGIT_TRACKS]
+    return [
+        {
+            "centre": round((track["centre"] - x0) / span_x - 0.5, 6),
+            "width": round((track["width"] + 1) / span_x, 6),
+            "tipFraction": round((track["tip"] - y0) / span_y, 6),
+        }
+        for track in sorted(digits, key=lambda track: track["centre"])
+    ]
+
 
 def _chamfer(grid_mask: list[list[bool]]) -> tuple[list[list[int]], int]:
     """Two-pass chamfer distance to the silhouette boundary; drives the inflation."""

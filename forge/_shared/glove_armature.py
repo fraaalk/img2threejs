@@ -52,6 +52,15 @@ DIGIT_LENGTH = {"index": 0.90, "middle": 1.0, "ring": 0.94, "pinky": 0.77}
 # creased mitten and a solid mitten are the same picture, so the separation has to be geometric. That is
 # a property of the renderer, not of the hand.
 DIGIT_GROOVE_CELLS = 1.5
+# How broadly adjacent digits are blended into each other, in POLYGONISATION CELLS. The digits TOUCH on the
+# reference -- the gussets between them are sewn, so the physical gap is zero and what shows is a seam crease
+# -- and the plate measures exactly that: 0.0036 of the frame between neighbouring digits, a fifth of a cell.
+# A fifth of a cell is the one configuration a grid extractor cannot represent, being neither a gap it can
+# resolve nor an overlap; left as measured it welded seven edges on the fixture and broke the surface's genus,
+# V - E + F coming out at 0 instead of 2. Blending across it makes the pair one surface with a crease, which
+# is both what the reference shows and what the grid can carry. Two cells rather than one because one still
+# left a weld on the fixture; measured at two, both plates come out manifold and genus-0.
+DIGIT_BLEND_CELLS = 2.0
 # The margin the bounds add around the content, in digit radii. It feeds back into the cell size, so the
 # digit diameter below is solved for rather than assigned.
 BOUNDS_MARGIN_RADII = 1.6
@@ -165,29 +174,45 @@ def build_glove_sdf_descriptor(
     # anthropometry when against the palm they are 7% under.
     palm_depth = PALM_DEPTH_RATIO * palm_width
     finger_length = finger_band * 1.0
-    # The digit row's width is measured, so the digit radius follows from it rather than from a ratio:
-    # four digits packed edge to edge across the measured span, which is what the reference shows. The
-    # ratio prior is the fallback for a silhouette that could not supply the span, and it was wrong on
-    # the real plate by enough to push the outer digits off the glove.
+    # EACH digit is measured -- its width, its centre and its own tip -- rather than four equal cylinders
+    # spread evenly across one measured span. The plate carries all three and the assumption was wrong in
+    # all three ways at once: on the real Slingshot plate the digits are 0.226, 0.228, 0.204 and 0.129 of the
+    # frame wide, their centres are 0.233, 0.226 and 0.168 apart, and their tips sit at 0.036, 0.000, 0.062
+    # and 0.147 of the height. That last set orders them middle, index, ring, little on its own, so the
+    # per-digit length ratios below are no longer consulted when the plate resolves the digits.
+    #
+    # The even-spread version also stole width from every digit: it solved `4 * diameter + 3 * gap = span`
+    # with the gap fixed in grid cells, which on the real plate left each digit 0.175 of the frame where the
+    # plate says 0.20 to 0.23. Sixteen percent of every finger went into gaps the reference does not have.
+    runs = [entry for entry in (measured.get("digitRuns") or []) if float(entry.get("width", 0.0)) > 0.0]
     digit_row_width = float(measured["fingerSpanFraction"]) * hand_width
     if digit_row_width <= 0.0:
         raise ValueError("the silhouette measured a digit row of zero width; there is nothing to place digits across")
-    # Four diameters and three gaps fill the measured row, with each gap a fixed number of cells. The cell
-    # size depends on the bounds, the bounds margin depends on the digit radius, and the radius is what is
-    # being solved for -- so solve it rather than iterate. With the frame one unit tall and the margin
-    # `BOUNDS_MARGIN_RADII` radii at each end, the bounds are `1 + BOUNDS_MARGIN_RADII * diameter` tall,
-    # and substituting `gap = DIGIT_GROOVE_CELLS * bounds / resolution` into
-    # `row = 4 * diameter + 3 * gap` gives one linear equation in the diameter.
-    gaps = len(DIGITS) - 1
-    cells_per_gap = DIGIT_GROOVE_CELLS / resolution
-    diameter = (digit_row_width - gaps * cells_per_gap) / (len(DIGITS) + gaps * cells_per_gap * BOUNDS_MARGIN_RADII)
-    if diameter <= 0.0:
-        raise ValueError(
-            f"a digit row {digit_row_width:.4f} wide cannot hold {len(DIGITS)} digits separated by "
-            f"{DIGIT_GROOVE_CELLS} cells at resolution {resolution}"
-        )
-    finger_radius = diameter / 2.0
-    digit_gap = cells_per_gap * (1.0 + BOUNDS_MARGIN_RADII * diameter)
+    if len(runs) == len(DIGITS):
+        radii = [float(entry["width"]) * hand_width / 2.0 for entry in runs]
+        centres = [float(entry["centre"]) * hand_width for entry in runs]
+        tips = [0.5 - float(entry["tipFraction"]) for entry in runs]
+    else:
+        # Fallback for a plate whose digits never resolve apart: four equal cylinders spread across the
+        # measured span, separated by the grid's own minimum. Solved rather than iterated -- the cell size
+        # depends on the bounds, the bounds margin depends on the digit radius, and the radius is what is
+        # being solved for, so substituting `gap = DIGIT_GROOVE_CELLS * bounds / resolution` into
+        # `row = 4 * diameter + 3 * gap` gives one linear equation in the diameter.
+        gaps = len(DIGITS) - 1
+        cells_per_gap = DIGIT_GROOVE_CELLS / resolution
+        diameter = (digit_row_width - gaps * cells_per_gap) / (len(DIGITS) + gaps * cells_per_gap * BOUNDS_MARGIN_RADII)
+        if diameter <= 0.0:
+            raise ValueError(
+                f"a digit row {digit_row_width:.4f} wide cannot hold {len(DIGITS)} digits separated by "
+                f"{DIGIT_GROOVE_CELLS} cells at resolution {resolution}"
+            )
+        digit_gap = cells_per_gap * (1.0 + BOUNDS_MARGIN_RADII * diameter)
+        step = diameter + digit_gap
+        radii = [diameter / 2.0 * (0.86 if index == len(DIGITS) - 1 else 1.0) for index in range(len(DIGITS))]
+        centres = [(index - (len(DIGITS) - 1) / 2.0) * step for index in range(len(DIGITS))]
+        tips = [0.5 - finger_band * (1.0 - DIGIT_LENGTH[digit]) for digit in DIGITS]
+    diameter = 2.0 * max(radii)
+    finger_radius = min(radii)
     # The knuckle line is the measured boundary between digits and palm, so it anchors both.
     palm_top = 0.5 - finger_band
 
@@ -255,28 +280,30 @@ def build_glove_sdf_descriptor(
                       round(palm_depth / 2.0 * (width / widest), 6)],
             "transform": {"translation": [round(mirror * centre * aspect, 6), round(y, 6), 0.0]},
         })
-    # Centre-to-centre, so the outer digits' outer edges land exactly on the measured span.
-    span = (len(DIGITS) - 1) * (diameter + digit_gap)
-    if span <= 0.0:
-        raise ValueError(f"measured digit row {digit_row_width} leaves no width to place {len(DIGITS)} digits across")
     thumb_direction = 1.0 if thumb_side == "right" else -1.0
-    for index, digit in enumerate(DIGITS):
-        # Digit placement is fitted, not detected: the reference shows the fingers pressed together,
-        # and the skyline peaks that would separate them are not reliably there.
-        #
-        # The ORDER, though, is anatomy: the index finger is the one beside the thumb, so the row runs
-        # from the thumb's side outward. Laying it out index-to-pinky in increasing x regardless put the
-        # pinky next to the thumb and the middle finger -- the longest -- on the wrong side of centre.
-        # It also crowded the thumb against the pinky closely enough to pinch the surface there, which is
-        # how it was found: all three non-manifold edges sat between `thumb-digit` and `pinky-digit`.
-        position = index if thumb_direction < 0.0 else (len(DIGITS) - 1 - index)
-        offset = (position - (len(DIGITS) - 1) / 2.0) * (span / (len(DIGITS) - 1))
-        length = finger_length * DIGIT_LENGTH[digit]
+    # The digits run from the thumb's side outward, because the index finger is the one beside the thumb.
+    # Naming them left-to-right regardless put the little finger against the thumb and the middle finger --
+    # the longest -- on the wrong side of centre, and it crowded the thumb against the little finger closely
+    # enough to pinch the surface: all three non-manifold edges of that build sat between `thumb-digit` and
+    # `pinky-digit`.
+    ordered = list(DIGITS) if thumb_direction < 0.0 else list(reversed(DIGITS))
+    for index, digit in enumerate(ordered):
+        radius = radii[index]
+        # The capsule's axis runs from the knuckle line to one radius short of the measured tip, so its far
+        # cap lands ON the tip and its near cap sits a diameter inside the palm, which is the knuckle.
+        top_axis = tips[index] - radius
+        base_axis = palm_top - radius
+        length = top_axis - base_axis
+        if length <= 0.0:
+            raise ValueError(
+                f"the {digit} digit's measured tip at {tips[index]:.4f} is at or below the knuckle line "
+                f"{palm_top:.4f}; the plate did not resolve a digit there"
+            )
         primitives.append(_capsule(
             f"{digit}-digit",
-            radius=finger_radius * (0.86 if digit == "pinky" else 1.0),
+            radius=radius,
             height=length,
-            translation=[mirror * offset, palm_top + length / 2.0 - finger_radius, 0.0],
+            translation=[mirror * centres[index], (base_axis + top_axis) / 2.0, 0.0],
             # Fingers curl slightly forward, which is what a worn glove does at rest.
             rotation=[math.radians(-9.0), 0.0, 0.0],
         ))
@@ -383,7 +410,7 @@ def build_glove_sdf_descriptor(
     # and the extracted mesh spanned 0.703 -- a silhouette 14% wider than the plate's own, from the blend
     # alone. With a cell of real overlap the crease a hard union leaves is finer than the grid can express.
     palm = combine("palm-sweep", slice_ids, "union") if len(slice_ids) > 1 else slice_ids[0]
-    digits = combine("digit-row", [f"{digit}-digit" for digit in DIGITS], "union")
+    digits = combine("digit-row", [f"{digit}-digit" for digit in DIGITS], "smooth-union", DIGIT_BLEND_CELLS * cell)
     hand = combine("knuckles", [palm, digits], "smooth-union", fillet)
     # The thumb web is a broad transition on a real hand, and it has to be broad here for a second
     # reason: a fillet narrower than the gap between the thumb and the palm leaves them nearly-touching
