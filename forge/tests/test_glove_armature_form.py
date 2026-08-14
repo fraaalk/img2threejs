@@ -73,21 +73,53 @@ class GloveArmatureFormTests(unittest.TestCase):
         y = self.low[1] + (self.high[1] - self.low[1]) * fraction
         return _solid_runs(self.sdf, (self.low[0], y, 0.0), (self.high[0], y, 0.0))
 
-    def test_the_digits_separate_from_their_tips_downward(self):
-        """The digits must part toward their tips and merge toward the palm, which is what the plate shows.
+    def _plate_peak_separation(self) -> int:
+        """How many digits the PLATE itself shows apart at once, from its own measured tips and webs.
 
-        This asserted eight consecutive heights crossing four separate solids, which suited digits placed
-        evenly with an air gap between them and does not survive digits measured off the plate. The reference
-        silhouette itself only resolves four separate runs across about one row in seventy-two: the little
-        finger starts a seventh of the way down, and the others have merged again by a quarter. Demanding
-        eight would demand a hand the reference is not.
-
-        What must hold is the SHAPE of the sequence -- one run at the top where only the longest digit reaches,
-        rising to four, then falling as they merge into the hand -- and that it never exceeds four, since a
-        fifth run in the digit band would be a stray solid.
+        Asserting a flat four was wrong, and the plate is what says so: each digit is separate only between
+        its own tip and its own web, those intervals are staggered, and on the fixture no single height falls
+        inside all four. The real Slingshot plate resolves four separate runs across about one row in
+        seventy-two. So the model is held to the plate's own maximum rather than to a number.
         """
-        counts = [len(self._at_height(0.58 + 0.016 * step)) for step in range(SWEEP_SAMPLES)]
-        self.assertEqual(max(counts), len(DIGITS), f"runs by height: {counts}")
+        edges = sorted({value for run in self.measured["digitRuns"]
+                        for value in (run["tipFraction"], run["mergeFraction"])})
+        best = 0
+        for low, high in zip(edges, edges[1:]):
+            middle = (low + high) / 2.0
+            best = max(best, sum(1 for run in self.measured["digitRuns"]
+                                 if run["tipFraction"] <= middle <= run["mergeFraction"]))
+        return best
+
+    def _sweep(self) -> list[int]:
+        """Runs crossed at each height across the whole digit band, in fractions of the plate's frame."""
+        band = float(self.measured["fingerBandFraction"])
+        return [len(self._at_top_fraction(band * (step + 0.5) / SWEEP_SAMPLES)) for step in range(SWEEP_SAMPLES)]
+
+    def _at_top_fraction(self, top: float) -> list[float]:
+        """`top` is measured DOWN FROM THE PLATE'S OWN TOP, not up from the descriptor's bounds.
+
+        The bounds pad the content by a margin that changes with the digits' radii, so a fraction of the
+        bounds is a different height on every plate -- these tests swept 0.58 to 0.90 of the bounds, tuned
+        when the knuckle line sat at 0.41 of the height, and looked straight past the digit band once the
+        knuckle was measured from the palm instead of from the thumb and moved to 0.27.
+        """
+        y = 0.5 - top
+        return _solid_runs(self.sdf, (self.low[0], y, 0.0), (self.high[0], y, 0.0))
+
+    def test_the_digits_separate_from_their_tips_downward(self):
+        """The digits must part toward their tips and merge toward the palm, as the plate shows.
+
+        The shape of the sequence is the assertion -- one run at the top where only the longest digit
+        reaches, rising as each shorter digit starts, falling as each reaches its web -- together with the
+        peak matching what the plate itself resolves.
+        """
+        counts = self._sweep()
+        # At LEAST what the plate resolves, and never more digits than there are. Equality would be too
+        # strict at the grid's own scale: the model's separation runs from each digit's measured tip to its
+        # measured web, the same interval the plate gives, but the sweep samples 21 heights and a pair whose
+        # intervals barely fail to overlap on the plate can overlap at one of them.
+        self.assertGreaterEqual(max(counts), self._plate_peak_separation(), f"runs by height: {counts}")
+        self.assertLessEqual(max(counts), len(DIGITS), f"runs by height: {counts}")
         peak = max(range(len(counts)), key=lambda index: counts[index])
         self.assertTrue(all(counts[i] <= counts[i + 1] for i in range(peak)), f"runs by height: {counts}")
         self.assertTrue(all(counts[i] >= counts[i + 1] for i in range(peak, len(counts) - 1)), f"runs by height: {counts}")
@@ -103,18 +135,11 @@ class GloveArmatureFormTests(unittest.TestCase):
             with self.subTest(height=fraction):
                 self.assertEqual(len(self._at_height(fraction)), 1)
 
-    def _height_with_all_digits(self) -> float:
-        """A height where the line crosses all four digits, found rather than assumed.
-
-        A fixed fraction is wrong per plate: the digits have different lengths, so above the pinky's tip
-        only three are there, and how far up that is depends on the measured finger band. Two tests here
-        used a hardcoded 0.78 and both failed the moment the band changed.
-        """
-        for step in range(SWEEP_SAMPLES):
-            fraction = 0.58 + 0.016 * step
-            if len(self._at_height(fraction)) == len(DIGITS):
-                return fraction
-        raise AssertionError("no sampled height crosses all four digits")
+    def _height_of_peak_separation(self) -> float:
+        """The height, down from the plate's top, at which the model shows the most digits apart."""
+        band = float(self.measured["fingerBandFraction"])
+        heights = [band * (step + 0.5) / SWEEP_SAMPLES for step in range(SWEEP_SAMPLES)]
+        return max(heights, key=lambda top: len(self._at_top_fraction(top)))
 
     def test_the_seam_between_digits_is_a_crease_not_a_fusion(self):
         """Adjacent digits touch, so what separates them is a crease -- and the crease has to be there.
@@ -130,9 +155,10 @@ class GloveArmatureFormTests(unittest.TestCase):
         """
         centres = sorted(
             (item["transform"]["translation"][0], item["radius"])
-            for item in self.body["primitives"] if item["id"].endswith("-digit") and item["id"] != "thumb-digit"
+            for item in self.body["primitives"]
+            if item["id"].endswith("-digit-tip") and item["id"] != "thumb-digit"
         )
-        y = self.low[1] + (self.high[1] - self.low[1]) * self._height_with_all_digits()
+        y = 0.5 - self._height_of_peak_separation()
 
         def thickness(x: float) -> float:
             runs = _solid_runs(self.sdf, (x, y, self.low[2]), (x, y, self.high[2]))
@@ -167,22 +193,33 @@ class GloveArmatureFormTests(unittest.TestCase):
     def test_digits_are_round_in_cross_section(self):
         """Depth against width for each digit. The inflation measured 0.13-0.18 here, where a finger is 1.
 
-        Measured through each digit's OWN centre, taken from the primitive, rather than through the centre of
-        whatever the first solid run at that height happens to be. Once the digits are blended at their seams,
-        the first run is no longer one digit, so that reading straddled a seam and reported a digit 1.63 times
-        as deep as it was wide.
+        Both numbers come from the FIELD at the same point, not from a declared radius. Comparing the solid's
+        depth against the radius of the primitive whose centre the line passes through reported the ring digit
+        at 1.62: the line was crossing the wider knuckle segment while the radius came from the narrower tip
+        segment above it. Measuring both from the field cannot make that mistake.
         """
-        y = self.low[1] + (self.high[1] - self.low[1]) * self._height_with_all_digits()
-        for item in self.body["primitives"]:
-            if not item["id"].endswith("-digit") or item["id"] == "thumb-digit":
-                continue
-            x = item["transform"]["translation"][0]
-            with self.subTest(digit=item["id"]):
-                depth = _solid_runs(self.sdf, (x, y, self.low[2]), (x, y, self.high[2]))
-                self.assertTrue(depth, f"{item['id']} has no solid at its own centre")
-                ratio = max(depth) / (2.0 * item["radius"])
-                self.assertGreater(ratio, 0.7, f"{item['id']} is {ratio:.2f} as deep as it is wide")
-                self.assertLess(ratio, 1.5, f"{item['id']} is {ratio:.2f} as deep as it is wide")
+        top = self._height_of_peak_separation()
+        y = 0.5 - top
+        runs = self._at_top_fraction(top)
+        self.assertTrue(runs, "no solid at the height of peak separation")
+        step = (self.high[0] - self.low[0]) / (LINE_SAMPLES - 1)
+        # Walk the row, and for each separate run measure through its own middle.
+        inside = [self.sdf((self.low[0] + step * index, y, 0.0)) < 0.0 for index in range(LINE_SAMPLES)]
+        spans: list[tuple[int, int]] = []
+        for index, solid in enumerate(inside):
+            if solid and (not spans or not inside[index - 1] or index == 0):
+                spans.append((index, index))
+            elif solid:
+                spans[-1] = (spans[-1][0], index)
+        for low, high in spans:
+            width = (high - low + 1) * step
+            centre = self.low[0] + step * (low + high) / 2.0
+            with self.subTest(centre=round(centre, 4)):
+                depth = _solid_runs(self.sdf, (centre, y, self.low[2]), (centre, y, self.high[2]))
+                self.assertTrue(depth, "a solid run with no depth under it")
+                ratio = max(depth) / width
+                self.assertGreater(ratio, 0.7, f"a digit {ratio:.2f} as deep as it is wide; a finger is about 1")
+                self.assertLess(ratio, 1.5, f"a digit {ratio:.2f} as deep as it is wide; a finger is about 1")
 
     def test_all_five_digits_stand_clear_of_the_rest_of_the_hand(self):
         """A glove has five digits, and four of them being obvious does not make the fifth exist.

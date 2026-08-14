@@ -118,7 +118,7 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     # as a smooth dome, so a near-peak threshold fires wherever noise first brushes it: on the real
     # Slingshot plate that was 0.373 of the height against a peak at 0.408, and the difference showed up
     # as fingers a tenth of the hand too short. The widest row is a landmark; a tolerance band is a knob.
-    knuckle = max(widths, key=lambda y: (widths[y], -y))
+    outline_knuckle = max(widths, key=lambda y: (widths[y], -y))
     # How wide the four digits actually sit. Sampled halfway down the digit band, which on both plates
     # in this repository is the last height that still resolves separate digit runs while the thumb has
     # not yet widened the span: a quarter of the way down the digits are still tapering to their tips and
@@ -128,8 +128,8 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     # Without any measurement the digit row was a constant 0.86 of the palm width centre-to-centre,
     # which with the radius prior made it 1.07 palm widths wide -- wider than the palm, so the outer
     # digits sat off the glove entirely and sampled the plate's background.
-    digit_row = y0 + max(1, int((knuckle - y0) * 0.5))
-    digit_bounds = rows.get(digit_row) or rows[knuckle]
+    digit_row = y0 + max(1, int((outline_knuckle - y0) * 0.5))
+    digit_bounds = rows.get(digit_row) or rows[outline_knuckle]
     # The width of the silhouette at each height below the knuckle line, as a fraction of the widest
     # row, plus where that row's centre sits. This is the one part of the form the plate really does
     # observe, and fitting a single ellipsoid to it instead threw it away: on the real Slingshot plate
@@ -152,6 +152,21 @@ def _resample(cells: list[int], width: int, grid: int) -> tuple[list[list[bool]]
     areas = {side: sum(max(0, value) for _y, value in entries) for side, entries in reach.items()}
     thumb_side = "left" if areas["left"] > areas["right"] else "right"
     thumb_left = thumb_side == "left"
+    # The knuckle line is the widest row of the PALM, not of the whole outline, and on a plate with a thumb
+    # those are different rows. The outline's widest row is wherever the hand reaches furthest, which on the
+    # real Slingshot plate is 0.42 of the height -- the thumb's own widest point, since the thumb's reach peaks
+    # at 0.44. The palm on its own peaks at 0.28 and narrows monotonically below that, which is the metacarpal
+    # heads, which is the knuckles.
+    #
+    # Taking the outline's row put the knuckle line 46% too low and stretched every digit to match: the digits
+    # ran separate down to 0.41 where the plate merges them at 0.22 to 0.27, right above the palm's own peak.
+    # Two passes rather than one, because the digit envelope that removes the thumb is itself derived from a
+    # provisional knuckle -- the first pass locates the envelope, the second locates the knuckle behind it.
+    palm_widths = {
+        y: ((high - max(low, digit_bounds[0])) if thumb_left else (min(high, digit_bounds[1]) - low)) / span_x
+        for y, (low, high) in rows.items()
+    }
+    knuckle = max(palm_widths, key=lambda y: (palm_widths[y], -y))
     profile: list[tuple[float, float]] = []
     palm_profile: list[tuple[float, float]] = []
     for step in range(PROFILE_SLICES):
@@ -238,10 +253,13 @@ def _digit_tracks(
         for run in runs_at(y):
             owners = [track for track in active if touching(run, track["last"])]
             if len(owners) > 1 or any(touching(run, block) for block in merged):
+                for track in owners:
+                    track["mergeRow"] = y
                 finished.extend(owners)
                 next_merged.append(run)
             elif owners:
                 owners[0]["last"] = run
+                owners[0]["mergeRow"] = y
                 owners[0]["rows"] += 1
                 if run[1] - run[0] > owners[0]["width"]:
                     owners[0]["width"] = run[1] - run[0]
@@ -249,7 +267,7 @@ def _digit_tracks(
                 owners[0]["widths"].append(run[1] - run[0])
                 next_active.append(owners[0])
             else:
-                next_active.append({"tip": y, "last": run, "rows": 1, "widths": [run[1] - run[0]],
+                next_active.append({"tip": y, "last": run, "rows": 1, "widths": [run[1] - run[0]], "mergeRow": y,
                                     "width": run[1] - run[0], "centre": (run[0] + run[1]) / 2.0})
         finished.extend(track for track in active if track not in next_active and track not in finished)
         active, merged = next_active, next_merged
@@ -280,6 +298,10 @@ def _digit_tracks(
                 MIN_TIP_WIDTH_RATIO * (track["width"] + 1),
             ) / span_x, 6),
             "tipFraction": round((track["tip"] - y0) / span_y, 6),
+            # Where this digit stops being separate, which is its web. The proximal segment ends here rather
+            # than at some fraction of the digit's length: carried to the halfway point instead, the widened
+            # knuckle segments merged the digits from 0.18 of the height where the plate merges them at 0.22.
+            "mergeFraction": round((track["mergeRow"] - y0) / span_y, 6),
         }
         for track in sorted(digits, key=lambda track: track["centre"])
     ]

@@ -51,6 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.147 of the height — which orders them middle, index, ring, little with no anthropometric prior consulted.
   The even spread also took 16% off every finger, solving `4 * diameter + 3 * gap = span` with the gap fixed
   in grid cells and leaving each digit 0.175 of the frame where the plate says 0.20 to 0.23.
+- **The knuckle line was measuring the thumb.** It was the widest row of the whole outline, and on a plate
+  with a thumb those are different rows: the real Slingshot outline peaks at 0.42 of the height, which is
+  where the THUMB is widest, while the palm on its own peaks at 0.28 and narrows monotonically below. The
+  finger band was 46% too long as a result. It is now the widest row of the palm with the thumb's band
+  removed, which is the metacarpal heads.
+- Each digit's web is measured too, so the digits merge one at a time as they do on the plate. The webs sit at
+  0.28, 0.23, 0.18 and 0.18 of the height on the real plate — a staircase, not one height for all four — and
+  the model now reproduces the plate's merge order exactly: four separate digits at 0.18, three at 0.22, two
+  at 0.26, one at 0.30.
 - **The digits taper, and that is what lets them separate.** Modelled as cylinders of their widest section
   the four fingers fused into a mitten, because the gap between two neighbours AT THEIR WIDEST is 0.1 to 0.9
   of a grid cell — sub-cell, and unrepresentable. A fifth of the way down from the tips the same gap is 2.1

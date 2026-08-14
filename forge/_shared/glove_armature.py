@@ -193,6 +193,7 @@ def build_glove_sdf_descriptor(
         tip_radii = [float(entry.get("tipWidth") or entry["width"]) * hand_width / 2.0 for entry in runs]
         centres = [float(entry["centre"]) * hand_width for entry in runs]
         tips = [0.5 - float(entry["tipFraction"]) for entry in runs]
+        webs = [0.5 - float(entry.get("mergeFraction") or entry["tipFraction"]) for entry in runs]
     else:
         # Fallback for a plate whose digits never resolve apart: four equal cylinders spread across the
         # measured span, separated by the grid's own minimum. Solved rather than iterated -- the cell size
@@ -213,6 +214,7 @@ def build_glove_sdf_descriptor(
         tip_radii = list(radii)
         centres = [(index - (len(DIGITS) - 1) / 2.0) * step for index in range(len(DIGITS))]
         tips = [0.5 - finger_band * (1.0 - DIGIT_LENGTH[digit]) for digit in DIGITS]
+        webs = [(palm_top_guess + tip) / 2.0 for palm_top_guess, tip in ((0.5 - finger_band, tip) for tip in tips)]
     diameter = 2.0 * max(radii)
     finger_radius = min(radii)
     # The knuckle line is the measured boundary between digits and palm, so it anchors both.
@@ -289,8 +291,21 @@ def build_glove_sdf_descriptor(
     # enough to pinch the surface: all three non-manifold edges of that build sat between `thumb-digit` and
     # `pinky-digit`.
     ordered = list(DIGITS) if thumb_direction < 0.0 else list(reversed(DIGITS))
+    # The proximal segments are widened until adjacent ones OVERLAP by a cell, and the plate is what asks for
+    # it: it merges the digits from 0.22 to 0.27 of the height, the band immediately above the knuckle line, so
+    # at the web they are one solid and not four near-touching ones. Measured they sit 0.1 to 0.9 of a cell
+    # apart there, which is the width a grid extractor cannot carry -- it welded two edges and left the
+    # surface's characteristic at an odd 1. The factor is solved from the measured spacings so it is the
+    # smallest that clears every pair, and it applies only to the proximal segments: the distal ones keep the
+    # widths the plate measured, which is what holds the digits apart above the web.
+    knuckle_scale = 1.0
+    for index in range(len(radii) - 1):
+        spacing = abs(centres[index + 1] - centres[index])
+        pair = radii[index] + radii[index + 1]
+        if pair > 0.0:
+            knuckle_scale = max(knuckle_scale, (spacing + cell) / pair)
     for index, digit in enumerate(ordered):
-        radius = radii[index]
+        radius = radii[index] * knuckle_scale
         tip_radius = tip_radii[index]
         # TWO segments per digit, because a digit tapers and the taper is what lets neighbours separate.
         # Measured on the real plate the gap between two digits at their WIDEST is 0.1 to 0.9 of a grid cell
@@ -303,16 +318,25 @@ def build_glove_sdf_descriptor(
                 f"the {digit} digit's measured tip at {tips[index]:.4f} is at or below the knuckle line "
                 f"{palm_top:.4f}; the plate did not resolve a digit there"
             )
-        middle = (palm_top + tips[index]) / 2.0
-        for part, part_radius, low, high in (
-            ("", radius, palm_top - radius, middle),
-            ("-tip", tip_radius, middle - tip_radius, tips[index] - tip_radius),
-        ):
+        # Each digit's own measured web, and the segment ENDS there rather than starting from it. Clamping the
+        # web up to `palm_top + radius` -- to keep the proximal capsule from inverting -- quietly threw the
+        # measurement away and put every digit's web at the ring finger's, merging all four from 0.20 of the
+        # height where the plate keeps the index apart to 0.28. The webs really are per-digit: 0.28, 0.23,
+        # 0.18, 0.18 on the real plate, which is the staircase a hand has.
+        web = min(max(webs[index], palm_top), tips[index] - 2.0 * tip_radius)
+        segments = (
+            # A capsule's caps are part of its reach, so an axis from `palm_top - radius` to `web - radius`
+            # spans exactly the knuckle line to the web. A digit whose web sits at the knuckle gets a
+            # zero-length axis, which is a sphere at the knuckle -- correct, not degenerate.
+            ("", radius, palm_top - radius, web - radius),
+            ("-tip", tip_radius, web - tip_radius, tips[index] - tip_radius),
+        )
+        for part, part_radius, low, high in segments:
             primitives.append(_capsule(
                 f"{digit}-digit{part}",
                 radius=part_radius,
-                height=max(high - low, part_radius),
-                translation=[mirror * centres[index], (low + max(high, low + part_radius)) / 2.0, 0.0],
+                height=max(0.0, high - low),
+                translation=[mirror * centres[index], (low + max(high, low)) / 2.0, 0.0],
                 # Fingers curl slightly forward, which is what a worn glove does at rest.
                 rotation=[math.radians(-9.0), 0.0, 0.0],
             ))
