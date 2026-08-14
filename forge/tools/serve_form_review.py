@@ -46,7 +46,12 @@ import { polygonizeSdfAttributes } from './sdf.mjs';
 
 const report = await (await fetch('./form.json')).json();
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101014);
+// A NEUTRAL background, and the exact value matters. `build_foreground_mask` admits any pixel with
+// saturation over 0.16 and luma under 0.94, to catch dark-but-coloured subjects, and 0x101014's slight blue
+// tint saturates at 0.20 -- so the background counted as subject, the mask came back at 1.000 of the frame,
+// and every silhouette measurement taken from this page was measuring the frame. A grey with R = G = B
+// saturates at zero.
+scene.background = new THREE.Color(0x101010);
 const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.01, 40);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
@@ -118,9 +123,9 @@ INDEX = """<!doctype html>
 <title>glove form review</title>
 <style>
   :root { color-scheme: dark; }
-  body { margin: 0; overflow: hidden; background: #101014; font: 13px/1.5 ui-monospace, monospace; color: #cfcbc4; }
+  body { margin: 0; overflow: hidden; background: #101010; font: 13px/1.5 ui-monospace, monospace; color: #cfcbc4; }
   #readout { position: fixed; top: 0; left: 0; padding: 10px 14px; white-space: pre; pointer-events: none;
-             background: linear-gradient(#101014e0, #10101400); }
+             background: linear-gradient(#101010e0, #10101000); }
   #keys { position: fixed; bottom: 0; left: 0; padding: 10px 14px; color: #7d7a74; pointer-events: none; }
 </style>
 <div id="readout"></div>

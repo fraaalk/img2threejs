@@ -63,9 +63,27 @@ COLOR_DELTA_E_THRESHOLD = 20.0  # generous vs. the JND (~2-3) to tolerate render
 MASK_GRID_SIZE = 224
 
 
-def mask_is_inverted(warnings: list[str]) -> bool:
-    """Return whether foreground extraction fell back to whole-frame coverage."""
-    return any("tiny" in str(warning).lower() for warning in warnings)
+# The two ways `build_foreground_mask` can end up with a mask that covers essentially the whole frame. They
+# are different conditions and only one of them was being caught.
+_UNUSABLE_MASK_MARKERS = ("tiny", "not clearly isolated")
+
+
+def mask_is_unusable(warnings: list[str]) -> bool:
+    """Whether foreground extraction produced a mask that cannot carry a silhouette.
+
+    `build_foreground_mask` gives up in two ways. Under 3.5% coverage it warns "foreground mask is tiny" and
+    falls back to alpha, which on an opaque image is the whole frame. Over 90% coverage it warns "image is not
+    clearly isolated from background" and leaves the mask as it is -- also the whole frame. Both make IoU,
+    scale and aspect measure the frame instead of the subject.
+
+    This caught only the first, and the second is the one that fires in practice: an untextured normal-shaded
+    render on a dark background reads as unisolated, its mask comes back at 1.000 of the frame, and the
+    silhouette IoU against a reference then equals the REFERENCE's own fill fraction -- 0.729 on the glove
+    plate here -- which looks like a real score and is not one. The two guards that call this both describe
+    what they are rejecting as "whole-frame coverage", so both conditions were always meant to be in scope.
+    """
+    lowered = [str(warning).lower() for warning in warnings]
+    return any(marker in warning for warning in lowered for marker in _UNUSABLE_MASK_MARKERS)
 
 
 def load_mask(png_path: Path, size: int = MASK_GRID_SIZE) -> tuple[list[bool], list[str]]:
@@ -264,11 +282,12 @@ def run_tier1(
         "bilateralSymmetryError": round(symmetry, 4),
     }
     failures: list[str] = []
-    if mask_is_inverted(reference_mask_warnings) or mask_is_inverted(render_mask_warnings):
+    if mask_is_unusable(reference_mask_warnings) or mask_is_unusable(render_mask_warnings):
         failures.append(
-            "silhouette evidence is unusable: the foreground mask fell back to whole-frame "
-            "coverage (subject under 3.5% of the frame), so IoU and proportion are not "
-            "measuring the subject; re-capture with the subject filling more of the frame"
+            "silhouette evidence is unusable: the foreground mask covers essentially the whole "
+            "frame, either because the subject fell under 3.5% of it or because it never separated "
+            "from the background, so IoU and proportion are not measuring the subject; re-capture "
+            "with the subject isolated and filling more of the frame"
         )
     if iou < SILHOUETTE_IOU_THRESHOLD:
         # Name WHICH kind of error this is. A raw IoU that a pure translation lifts over the

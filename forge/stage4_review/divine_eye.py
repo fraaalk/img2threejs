@@ -41,7 +41,7 @@ from diagnose_render import (  # noqa: E402
     bbox_of,
     bilateral_symmetry_error,
     load_mask,
-    mask_is_inverted,
+    mask_is_unusable,
     proportion_delta,
     silhouette_iou,
 )
@@ -334,7 +334,7 @@ def evaluate(reference_png: Path, render_png: Path) -> dict[str, Any]:
 
     # HARD gates: a fail is an immediate reject with a specific numeric reason.
     hard_failures: list[str] = []
-    if mask_is_inverted(ref_mask_warnings) or mask_is_inverted(ren_mask_warnings):
+    if mask_is_unusable(ref_mask_warnings) or mask_is_unusable(ren_mask_warnings):
         hard_failures.append(
             "foreground mask fell back to whole-frame coverage; silhouette, scale and aspect "
             "signals are not measuring the subject"

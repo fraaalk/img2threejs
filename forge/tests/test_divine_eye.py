@@ -21,7 +21,7 @@ from divine_eye import (  # noqa: E402
     global_ssim,
     tonal_parity,
 )
-from diagnose_render import mask_is_inverted, silhouette_iou  # noqa: E402
+from diagnose_render import mask_is_unusable, silhouette_iou  # noqa: E402
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -159,9 +159,42 @@ class DegenerateEvidenceTest(unittest.TestCase):
         self.assertTrue(result["maskWarnings"])
         self.assertNotEqual(result["verdict"], "pass")
 
-    def test_mask_inversion_warning_is_explicit(self):
-        self.assertTrue(mask_is_inverted(["foreground mask is tiny; material extraction is unreliable"]))
-        self.assertFalse(mask_is_inverted(["image is not clearly isolated from background"]))
+    def test_both_whole_frame_fallbacks_are_caught(self):
+        """`build_foreground_mask` gives up in two ways and both leave a mask covering the whole frame.
+
+        This test used to assert the OPPOSITE for the second one -- that "not clearly isolated" is fine --
+        which made the hard gate in `evaluate` unable to fire for the case that actually happens. An
+        untextured normal-shaded render on a dark background reads as unisolated, its mask comes back at
+        1.000 of the frame, and the silhouette IoU against a reference then equals the reference's own fill
+        fraction: 0.729 measured on this repository's glove plate, which looks like a score and is not one.
+        """
+        self.assertTrue(mask_is_unusable(["foreground mask is tiny; material extraction is unreliable"]))
+        self.assertTrue(mask_is_unusable(
+            ["image is not clearly isolated from background; using most pixels as material evidence"]
+        ))
+        self.assertFalse(mask_is_unusable([]))
+        self.assertFalse(mask_is_unusable(["colour profile assumed sRGB"]))
+
+    def test_a_whole_frame_mask_cannot_score(self):
+        """The point of the predicate: a degenerate mask must reject, not produce a plausible fidelity.
+
+        A render that never separates from its background is compared against a reference that does. Every
+        silhouette signal is then measuring the frame, so the verdict has to be a hard failure naming that --
+        not a number a reader would act on.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reference, render = root / "reference.png", root / "render.png"
+            write_rgb_png(reference, 200, 200, block(60, 60, 140, 140))
+            # A render whose "background" is the same mid-grey as its subject: nothing to separate.
+            write_rgb_png(render, 200, 200, lambda x, y, w, h: (128, 128, 128))
+            result = evaluate(reference, render)
+            self.assertTrue(result["maskWarnings"], "the extractor did not warn about the flat render")
+            self.assertTrue(
+                any("whole-frame" in failure for failure in result["hardGateFailures"]),
+                f"hard gates were {result['hardGateFailures']}",
+            )
+            self.assertNotEqual(result["verdict"], "pass")
 
 
 if __name__ == "__main__":
