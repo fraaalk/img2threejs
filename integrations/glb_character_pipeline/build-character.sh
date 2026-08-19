@@ -70,6 +70,9 @@ export CHARACTER_BIN_DIR="${CHARACTER_BIN_DIR:-public/head}"
 export CHARACTER_WORK_TAG="${CHARACTER_WORK_TAG:-}"
 export CHARACTER_CODEC="${CHARACTER_CODEC:-src/demos/girl-character/surfaceCodec.ts}"
 export CHARACTER_REGIONS_JSON="${CHARACTER_REGIONS_JSON:-}"
+export CHARACTER_SECTION_REGIONS_JSON="${CHARACTER_SECTION_REGIONS_JSON:-}"
+export CHARACTER_SPOKES_JSON="${CHARACTER_SPOKES_JSON:-}"
+export CHARACTER_CROSS_SECTIONS="${CHARACTER_CROSS_SECTIONS:-}"
 
 echo "== Stage 0: baseline present and is actually a GLB? =="
 if [ ! -e "$CHARACTER_GLB" ]; then
@@ -84,6 +87,26 @@ if [ "$magic" != "glTF" ]; then
   exit 1
 fi
 echo "  ok: $CHARACTER_GLB"
+
+echo
+echo "== Stage 1: cross-section loft (Python, the code-only floor) =="
+if [ -z "$CHARACTER_SPOKES_JSON" ] || [ -z "$CHARACTER_SECTION_REGIONS_JSON" ] || [ -z "$CHARACTER_CROSS_SECTIONS" ]; then
+  echo "  CHARACTER_SPOKES_JSON / CHARACTER_SECTION_REGIONS_JSON / CHARACTER_CROSS_SECTIONS not all set --"
+  echo "  skipping regeneration and leaving any existing crossSections.ts alone. See PIPELINE.md Stage 1"
+  echo "  and configs/example.env before setting these for a new character: the per-node spoke budget is"
+  echo "  a MEASURED, per-character decision (measure_density_convergence.py), not something to guess."
+else
+  "$PY" "$PY_SCRIPTS/build_cross_sections.py"
+  if [ "${CHARACTER_ALLOW_BASELINE_UV:-}" = "1" ]; then
+    if "$PY" -c "import numpy" 2>/dev/null; then
+      echo "  CHARACTER_ALLOW_BASELINE_UV=1 -- baking baseline UVs onto the cross-sections (authorised"
+      echo "  deviation from the no-baseline-assets rule; see bake_atlas_uvs.py's own docstring)."
+      "$PY" "$PY_SCRIPTS/bake_atlas_uvs.py"
+    else
+      echo "  CHARACTER_ALLOW_BASELINE_UV=1 but numpy is not installed for \$PY ($PY) -- skipping." >&2
+    fi
+  fi
+fi
 
 echo
 echo "== Stage 2: re-splat implicit surfaces (Python + numpy) =="

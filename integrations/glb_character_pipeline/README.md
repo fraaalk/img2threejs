@@ -22,18 +22,21 @@ that checkout before running anything below — the same env var `forge/tests` a
 companion showcase for its TypeScript typecheck gates.
 
 **The GLB is a measurement instrument, never a shipped asset — but "code-only" covers two genuinely
-different things here, and they should not be read as the same claim:**
-- **Stage 1 (cross-section loft)** measures the GLB down to a small set of numbers (spoke count per
-  node, Catmull-Rom control points, target edge length) and hardcodes those as constants that a
-  generator function then builds geometry from, at runtime, from scratch. This is the "standard
-  parameter set feeding a procedural generator" sense of the word.
-- **Stage 2/3 (SDF splat + Surface Nets + compact encoding)** is not that. It captures the *entire*
-  measured surface — millions of vertices — and re-encodes it (varint deltas + connectivity bits,
-  ~8 bytes/vertex) as base64 inside a committed `.ts` module. There is still no runtime fetch and it
-  is still source-controlled code, but it is a compressed, embedded copy of the measured geometry, not
-  a small parameter vector a generator reconstructs the shape from. It exists only because a
-  cross-section loft is fundamentally 2.5D and cannot express detail that folds back on itself
-  (an eyelid, a nostril, a navel) — see `PIPELINE.md` Stage 1's closing note and Stage 2's opening.
+different things here, and they should not be read as the same claim.** Both stages embed measured
+data as committed `.ts` code (no runtime fetch either way); they differ in HOW MUCH of the measured
+surface that data actually is, and what runtime code does with it:
+- **Stage 1 (cross-section loft)** measures a SPARSE set of ring samples per node (girl-character: 748
+  rings, 86,240 points total, from a 2.1-million-vertex source) and a small set of tuning numbers
+  (per-node spoke count, Catmull-Rom control behaviour, target edge length). At runtime, a loft
+  function SYNTHESISES new geometry by interpolating *between* those measured rings — the walls
+  between ring i and ring i+1 do not exist in the measurement at all; they are generated.
+- **Stage 2/3 (SDF splat + Surface Nets + compact encoding)** measures DENSELY — every sign-changing
+  voxel cell, millions of vertices — and re-encodes that (varint deltas + connectivity bits,
+  ~8 bytes/vertex) as base64 inside a committed `.ts` module. At runtime there is no interpolation or
+  synthesis: decoding reproduces the measured surface itself, essentially unchanged. It exists only
+  because a cross-section loft is fundamentally 2.5D and cannot express detail that folds back on
+  itself (an eyelid, a nostril, a navel) — see `PIPELINE.md` Stage 1's closing note and Stage 2's
+  opening.
 
 Read `PIPELINE.md` end to end before running this on a new character — it is the full, stage-by-stage
 methodology (intake, cross-section loft, Surface Nets, compact encoding, verification, the eye-socket
@@ -68,6 +71,15 @@ for the full stage → script → output file map.
 
 ## What's here
 
+- `python/slice_node.py`, `python/measure_density_convergence.py`, `python/build_cross_sections.py` —
+  Stage 1: cross-section loft, the code-only floor. `measure_density_convergence.py` only prints
+  tables — deciding the final per-node spoke count is a human/agent judgment call, not something it
+  resolves for you (see `PIPELINE.md` Stage 1). Optional per build: leave `CHARACTER_SECTION_REGIONS_JSON`
+  / `CHARACTER_SPOKES_JSON` / `CHARACTER_CROSS_SECTIONS` unset to skip and keep an existing file as-is.
+- `python/bake_atlas_uvs.py` — an explicitly-gated (`CHARACTER_ALLOW_BASELINE_UV=1`) escape hatch that
+  transfers a baseline GLB's own texture UVs onto the cross-sections. This departs from img2threejs's
+  normal no-baseline-assets rule (it was a one-off, authorised exception for girl-character) — read its
+  own docstring in full before ever setting that env var for a new character.
 - `python/build_head_surface.py`, `python/export_sdf_surfaces.py` — Stage 2: SDF splat + Surface Nets,
   per node, batched across a character's node list.
 - `node/verify_cells.mjs` — Stage 3 pre-check: rebuild every triangle from cell adjacency alone and diff

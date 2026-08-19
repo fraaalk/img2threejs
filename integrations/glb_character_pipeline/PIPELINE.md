@@ -81,13 +81,17 @@ is fundamentally 2.5D (one radius per angular bin), and no amount of spoke densi
 doubles back on itself (an eyelid, a nostril). That is what Stage 2 is for.
 
 **Read this before treating Stage 2/3 as "more of the same" measurement-to-parameter process this stage
-is.** Stage 1 measures the GLB down to a handful of numbers (spoke counts, control points, a target edge
-length) and hands them to a generator that builds geometry from scratch at runtime — a real "standard
-parameter set driving a procedural function." Stage 2/3 does not produce parameters at all: it captures
-the *entire* measured surface and re-encodes it (compressed, but still the whole thing) as embedded code.
-Both are "code-only, no runtime fetch," but only Stage 1 is parametric in the generative sense; Stage 2/3
-is a compact, committed copy of the measurement itself, reached for only where Stage 1's 2.5D loft cannot
-express the geometry at all.
+is.** Stage 1 measures the GLB down to a SPARSE set of ring samples per node (girl-character: 748 rings,
+86,240 points total, from a 2.1-million-vertex source) plus a handful of tuning numbers (spoke counts,
+control-curve behaviour, a target edge length). At runtime a loft function SYNTHESISES the walls between
+consecutive rings by interpolation -- that geometry does not exist in the measurement at all. Stage 2/3
+does the opposite: it measures DENSELY (every sign-changing voxel cell, millions of vertices) and
+re-encodes that whole capture (compressed, but still the whole thing) as embedded code, with no
+interpolation at decode time -- what comes back out is the measured surface itself, not a synthesis
+between sparse samples of it. Both are "code-only, no runtime fetch," and both embed genuinely measured
+data as committed TypeScript; they differ in how much of the surface that data is and whether runtime
+code synthesises between it or merely decodes it. Stage 2/3 is reached for only where Stage 1's 2.5D
+loft-and-interpolate cannot express the geometry at all (a fold that doubles back on itself).
 
 ## Stage 2 — Implicit surface reconstruction (Surface Nets)
 
@@ -362,13 +366,14 @@ Before calling a pass done:
 
 | Stage | Script/module | Produces |
 |---|---|---|
-| 1 | `scripts/build_cross_sections.py`, `src/demos/girl-character/crossSections.ts` | measured ring data, loft geometry |
+| 1 | `python/slice_node.py`, `python/measure_density_convergence.py`, `python/build_cross_sections.py`, `src/demos/girl-character/crossSections.ts` | measured ring data, loft geometry |
+| 1 (gated) | `python/bake_atlas_uvs.py` (`CHARACTER_ALLOW_BASELINE_UV=1` only) | baseline-transferred UVs -- authorised one-off deviation, not the default path |
 | 2 | `python/build_head_surface.py`, `python/export_sdf_surfaces.py` | per-node SDF + Surface Nets → `HEDS` binary (dev-only intermediate) |
 | 3 | `node/encode_surfaces.mjs`, `node/emit_surface_module.mjs` | `src/demos/girl-character/surfaceData[.ts\|Low.ts\|Medium.ts]` |
 | 4 | `src/demos/girl-character/surfaceCodec.ts` | runtime decode → `THREE.BufferGeometry` |
 | 5 | `src/demos/girl-character/walkRig.ts`, `hardware.ts`, `measuredAnchors.ts` | skeleton, skin weights, gait, attachments |
 | 6 | `createGirlCharacterModel.ts` (eye functions) | eye lens mesh + texture |
-| 8 | `node/verify_cells.mjs`, `node/verify_roundtrip.mjs`, `node/compare_views.mjs`, `scripts/capture-girl-character.mjs` | correctness + fidelity evidence |
+| 8 | `node/verify_cells.mjs`, `node/verify_roundtrip.mjs`, `node/compare_views.mjs`, `node/capture-character.mjs` | correctness + fidelity evidence |
 
 ## Appendix C — Open item on this character
 
