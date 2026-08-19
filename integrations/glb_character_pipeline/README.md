@@ -15,6 +15,20 @@ This is a **companion-showcase** tool: every script here operates against a sepa
 that checkout before running anything below — the same env var `forge/tests` already uses to reach a
 companion showcase for its TypeScript typecheck gates.
 
+**The GLB is a measurement instrument, never a shipped asset — but "code-only" covers two genuinely
+different things here, and they should not be read as the same claim:**
+- **Stage 1 (cross-section loft)** measures the GLB down to a small set of numbers (spoke count per
+  node, Catmull-Rom control points, target edge length) and hardcodes those as constants that a
+  generator function then builds geometry from, at runtime, from scratch. This is the "standard
+  parameter set feeding a procedural generator" sense of the word.
+- **Stage 2/3 (SDF splat + Surface Nets + compact encoding)** is not that. It captures the *entire*
+  measured surface — millions of vertices — and re-encodes it (varint deltas + connectivity bits,
+  ~8 bytes/vertex) as base64 inside a committed `.ts` module. There is still no runtime fetch and it
+  is still source-controlled code, but it is a compressed, embedded copy of the measured geometry, not
+  a small parameter vector a generator reconstructs the shape from. It exists only because a
+  cross-section loft is fundamentally 2.5D and cannot express detail that folds back on itself
+  (an eyelid, a nostril, a navel) — see `PIPELINE.md` Stage 1's closing note and Stage 2's opening.
+
 Read `PIPELINE.md` end to end before running this on a new character — it is the full, stage-by-stage
 methodology (intake, cross-section loft, Surface Nets, compact encoding, verification, the eye-socket
 lesson in Stage 6), distilled from actually building `girl-character`. This README only covers install

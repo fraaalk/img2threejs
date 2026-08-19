@@ -66,6 +66,15 @@ This stage alone will not match the baseline closely on organic detail (a face, 
 is fundamentally 2.5D (one radius per angular bin), and no amount of spoke density recovers a fold that
 doubles back on itself (an eyelid, a nostril). That is what Stage 2 is for.
 
+**Read this before treating Stage 2/3 as "more of the same" measurement-to-parameter process this stage
+is.** Stage 1 measures the GLB down to a handful of numbers (spoke counts, control points, a target edge
+length) and hands them to a generator that builds geometry from scratch at runtime — a real "standard
+parameter set driving a procedural function." Stage 2/3 does not produce parameters at all: it captures
+the *entire* measured surface and re-encodes it (compressed, but still the whole thing) as embedded code.
+Both are "code-only, no runtime fetch," but only Stage 1 is parametric in the generative sense; Stage 2/3
+is a compact, committed copy of the measurement itself, reached for only where Stage 1's 2.5D loft cannot
+express the geometry at all.
+
 ## Stage 2 — Implicit surface reconstruction (Surface Nets)
 
 For nodes where the loft is not enough, splat a signed distance field from that node's own point cloud
