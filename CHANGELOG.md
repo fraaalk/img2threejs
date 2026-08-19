@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.4-beta.2]
 
 ### Added
+- Add an `npx` installer (`bin/cli.mjs`, published through a new root `package.json`): `npx -y github:img2threejs/img2threejs install` selects hosts interactively or by argument, asks for global or local scope, and links Claude, Codex, OpenCode, or any directory via `--dir` to a single canonical checkout at `~/.img2threejs/repo`.
+- Add `update`, which follows the newest governed release tag by default (`--channel beta|main`, `--ref` to pin) and moves every linked host at once, and `uninstall`, which works from an install receipt and refuses to remove anything that is not a symlink it created.
+- Adopt an existing hand-made checkout at a host path instead of refusing it, when it is a clean clone of this repository, carrying its untracked files to the canonical location.
 - Add a repository-local mandatory workflow checklist, resume gate, and evidence-backed step
   tracking under `.img2threejs/state.json`.
 - Add per-pass and total correction ceilings derived from `reviewHistory`; `forge/next.py` now

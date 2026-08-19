@@ -304,6 +304,8 @@ never ran is the failure this repository keeps rediscovering. A spec with no att
 passes cleanly, so existing specs are unaffected.
 
 ### runtime/scripts/export_mesh_geometry.mjs
+`runtime/` is not shipped with the repository: it is gitignored and carries no tracked files, so a
+fresh clone or an installer-created checkout does not contain this exporter. Provision it separately.
 `node runtime/scripts/export_mesh_geometry.mjs --url URL --out meshes.json [--include RE] [--exclude RE] [--max-triangles N] [--ready-flag F] [--viewer-handle H]`
 Dumps a running model's meshes as the JSON `self_intersection.py` reads. Vertices are emitted in
 **world** space on purpose: a parent's non-uniform scale can fold a mesh through itself even when its

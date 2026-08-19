@@ -17,13 +17,18 @@ browser MCP (playwright/chrome-devtools), the project preview, or a user-supplie
 
 ## Canonical shared checkout
 
-Keep one checkout of this repository and let every host enter it through a symlink, so Claude and
-Codex execute the same code instead of drifting apart:
+Keep one checkout of this repository and let every host enter it through a symlink, so Claude,
+Codex and OpenCode execute the same code instead of drifting apart:
 
 ```text
-~/.claude/skills/img2threejs -> <your checkout>
-~/.codex/skills/img2threejs  -> <your checkout>
+~/.claude/skills/img2threejs           -> ~/.img2threejs/repo
+~/.codex/skills/img2threejs            -> ~/.img2threejs/repo
+~/.config/opencode/skills/img2threejs  -> ~/.img2threejs/repo
 ```
+
+`npx -y github:img2threejs/img2threejs install` creates that layout, and `… update` moves every
+linked host to the latest release at once. Independent copies per host are not supported: they drift
+apart silently while every copy keeps reporting the same version.
 
 ## When To Use
 
@@ -317,6 +322,8 @@ Full flags: `grimoire/scripts.md`. Never let a script *score* visuals — that i
    floating below the ground plane survived eight front-only review rounds.
    `forge/stage4_review/turntable_gate.py --capture 0=front.png --capture 90=right.png --capture 180=rear.png --capture 270=left.png --json`
    `node runtime/scripts/export_mesh_geometry.mjs --url <preview> --out meshes.json` then
+   (`runtime/` is not shipped with the repository — provision that exporter separately, or
+   supply the mesh JSON another way; a fresh clone does not contain it) 
    `forge/stage4_review/self_intersection.py meshes.json --json`
    `forge/stage4_review/attachment_anchor.py object-sculpt-spec.json --measured measured.json --json`
    All three exit `0` clean / `1` gate failure / `2` error. A failure blocks `continue` for the pass

@@ -78,6 +78,7 @@ judgment is spent only where a script cannot decide.
 | v1.2 | Humanoid character generator | Shipped | Character/hybrid domain detection, anatomy and facial landmarks, proportion-lock and feature-placement build passes, per-part character materials |
 | v1.3 | Quality & efficiency (Divine Eye) | Shipped | Deterministic review harness, input-integrity and geometry-truth gates, projection-first texture/material analysis, CIEDE2000 colour math |
 | v1.4 | Weapon Pipeline | Shipped | CS2 image-matched reconstruction, provenance-aware intake, projection-first finishes, family-specific adapters, structural and component-coverage gates |
+| v1.5-install | Distribution | In progress | `npx` installer: one canonical checkout at `~/.img2threejs/repo`, one symlink per host (Claude / Codex / OpenCode / `--dir`), global or local scope, release-channel `update`, receipt-driven `uninstall` |
 | **v1.5** | Character Pipeline | Start supporting characters properly | Character reconstruction · facial features · rigging-ready topology · blendshape preparation · hair & clothing improvements |
 | **v1.6** | Environment Pipeline | Build scenes, not just objects | Buildings · rooms · streets · trees & vegetation · terrain-aware generation · multi-object reconstruction |
 | **v1.7** | Game Pipeline | Game-ready assets | Unity exporter · Unreal exporter · Blender bridge · FBX / OBJ / glTF improvements · LOD generation · collision mesh generation |

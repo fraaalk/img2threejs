@@ -1,0 +1,19 @@
+{
+  "name": "img2threejs",
+  "version": "1.4.4",
+  "description": "Installer for the img2threejs skill: one canonical checkout, one symlink per agent host.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/img2threejs/img2threejs.git"
+  },
+  "bin": {
+    "img2threejs": "bin/cli.mjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

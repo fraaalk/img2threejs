@@ -3,6 +3,8 @@
 Status: v1.2.0 SHIPPED. v1.1.0 = Track A detail-first + Track B/likeness scaffolding. v1.2.0 = humanoid character GENERATOR: a flattened, world-space humanoid componentTree template (head/neck/torso/arms + hair, glasses, headphones, face features), per-part character materials, character build passes (proportion-lock, feature-placement) and feature targets, auto-enabled when primaryDomain is character/hybrid (or --character). Verified end-to-end (spec -> generate -> browser render) on a real portrait, producing a recognizable stylized bust. 19/19 tests pass; object pipeline unaffected.
 Target versions: 1.1.0 (Track A), 1.2.0 (Track B + character generator)
 
+Distribution (v1.5-install, in progress): the skill is installed with `npx -y github:img2threejs/img2threejs install` rather than a hand-run `git clone`. One canonical checkout at `~/.img2threejs/repo`; each selected host (Claude, Codex, OpenCode, or any directory via `--dir`) is a symlink to it. `update` follows the newest governed release tag by default, not `main`. Independent per-host copies are unsupported — they drift while every copy keeps reporting the same version.
+
 v1.2.0 implementation notes:
 - Generator nodes carry transform.scale that cascades to children, so the humanoid template flattens all parts to world space under a hidden, unit-scaled root to avoid non-uniform-scale distortion. (Rig/pivot hierarchy for animation is a future refinement.)
 - createSculptMaterial only honours a colorVariation.palette with >= 2 entries (else it blends in beige fallback tones), so each character material provides two shades of its intended colour.

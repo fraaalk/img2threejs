@@ -98,19 +98,42 @@ A staged sculpting pipeline turns the reference image into a spec, then generate
 
 ## Quick start
 
-1. **Install** — place this folder in your skills directory:
+1. **Install** — one command, and pick your tools when it asks:
 
    ```bash
-   git clone https://github.com/img2threejs/img2threejs.git ~/.claude/skills/img2threejs
+   npx -y github:img2threejs/img2threejs install
    ```
 
-   If you use more than one host, keep a single checkout and point each entrypoint at it as a
-   symlink, so they cannot drift apart:
+   It keeps **one** checkout at `~/.img2threejs/repo` and points every host you select at it as a
+   symlink, so the hosts cannot drift apart:
 
    ```text
-   ~/.claude/skills/img2threejs -> <your checkout>
-   ~/.codex/skills/img2threejs  -> <your checkout>
+   ~/.claude/skills/img2threejs           -> ~/.img2threejs/repo
+   ~/.codex/skills/img2threejs            -> ~/.img2threejs/repo
+   ~/.config/opencode/skills/img2threejs  -> ~/.img2threejs/repo
    ```
+
+   Non-interactive, or for a tool the installer does not know:
+
+   ```bash
+   npx -y github:img2threejs/img2threejs install claude codex --yes
+   npx -y github:img2threejs/img2threejs install --dir ~/.some-agent/skills --yes
+   npx -y github:img2threejs/img2threejs install --local      # this project only
+   ```
+
+   Update every host at once, or remove the links again:
+
+   ```bash
+   npx -y github:img2threejs/img2threejs update      # latest release; --channel main for the tip
+   npx -y github:img2threejs/img2threejs uninstall
+   ```
+
+   Already cloned this repo by hand into a skills directory? `install` adopts a clean checkout and
+   promotes it to the canonical location instead of refusing or overwriting it. Run
+   `install --dry-run` first to see exactly what it will do.
+
+   The installer needs **Node 18+** and **git**; the skill itself still needs only Python 3.10+.
+   Windows link creation is unverified in this release.
 
 2. **Invoke** — in Claude Code, attach or point to an object image and run:
 
@@ -155,7 +178,8 @@ Useful additions depending on the subject:
 - **A saturated anodized or candy finish** — `The coat is candy-coat, not gem-metal. Keep the hue; do not let the environment steal it.`
 - **A cost ceiling** — `Stay at low effort and skip the presentation composer; I only need the evaluation render.`
 
-The scripts run from the skill root and need only Python 3.10+ — nothing to install.
+The scripts run from the skill root and need only Python 3.10+ — nothing to install for the
+skill itself. (The optional `npx` installer above is the one part that needs Node and git.)
 
 ```bash
 python3 forge/stage1_intake/probe_image.py <image>
@@ -178,7 +202,7 @@ For the script-by-script reference, the full scripts table, and expected artifac
 Most image-to-3D agent loops burn tokens by asking the model to do mechanical work — re-reading the whole model every pass, scoring pixels, validating JSON by hand, re-running steps it already did. img2threejs pushes all of that into deterministic scripts and spends model tokens only where judgment is actually required.
 
 - **Scripts enforce, the model judges.** The Python scripts handle validation, gating, spec authoring, PBR extraction, comparison-sheet packaging, and pipeline state. They never score visuals. The model's tokens go to one thing: looking at a single side-by-side sheet and deciding pass or fail.
-- **Zero dependencies, zero install churn.** Every script is pure Python 3.10+ standard library. No pip, no PIL, no numpy, no Playwright. PNG read/write is done with `struct` and `zlib`. Nothing to install means nothing to debug in-context.
+- **Zero dependencies, zero install churn.** Every script is pure Python 3.10+ standard library. No pip, no PIL, no numpy, no Playwright. (This is a claim about the skill's own runtime; the optional installer needs Node 18+ and git.) PNG read/write is done with `struct` and `zlib`. Nothing to install means nothing to debug in-context.
 - **Pass-gated generation.** The code generator emits only the currently unlocked build pass. The model does not regenerate or re-read the entire model on every iteration — each step is small and scoped.
 - **Fail fast, before codegen.** A strict-quality gate blocks shallow specs before a single line of Three.js is generated, so you never spend tokens rendering a model that was underspecified from the start.
 - **One image per review.** Each pass is judged from exactly one packaged comparison sheet (reference beside render), not a scattering of screenshots.
