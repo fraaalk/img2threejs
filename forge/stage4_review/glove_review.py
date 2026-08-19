@@ -45,7 +45,7 @@ METRIC_KINDS: Final[dict[str, str]] = {
 UNMEASURED_CONCERNS: Final[dict[str, str]] = {
     "seamBoundaryCorrespondence": "seam topology has not been emitted; a production weld stage must supply shared vertices",
     "productionManifold": "production seam welding has not been emitted, so manifoldness cannot be measured",
-    "referenceResemblance": "the wearable track makes no claim about resemblance to the reference image; see the glove-reference-conformance follow-up",
+    "referenceResemblance": "measured on the real plates, the panel-era slab geometry the docs record as wrong outscores the current armature on every signal -- bbox-normalised silhouette IoU 0.8656 against 0.6559 -- so no threshold over these signals ranks a correct model first; see the glove-reference-conformance change",
 }
 # Empty, and kept as the mechanism rather than deleted: a capture role whose framing is broken by a
 # geometry defect belongs here, recorded, rather than scored as if the model were at fault.
@@ -65,10 +65,10 @@ REQUIRED_RENDER_ENVIRONMENT = {
 VALID_THRESHOLD_STATUSES = frozenset({"uncalibrated", "verified-artifact-calibration-v2"})
 
 
-def build_uncalibrated_scene() -> dict[str, Any]:
+def build_uncalibrated_scene(subtype: str = "sport-gloves") -> dict[str, Any]:
     return {
         "version": "glove-review-scene-v2", "thresholdStatus": "uncalibrated",
-        "fixtureId": "sport-gloves-diagnostic-v1", "requiredViewRoles": sorted(REQUIRED_CAPTURE_ROLES),
+        "fixtureId": f"{subtype}-diagnostic-v1", "requiredViewRoles": sorted(REQUIRED_CAPTURE_ROLES),
         "cameras": [{"id": role, "role": role, "azimuth": angle, "elevation": 8.0, "viewport": [1024, 1024]} for role, angle in (("dorsal", 0), ("palmar", 180), ("thumb-side-profile", 90), ("three-quarter", 35), ("left-three-quarter", 35), ("right-three-quarter", -35), ("orbit-a", 120), ("orbit-b", -120))],
         "environment": {"hash": "glove-qa-neutral-v2", "toneMapping": "ACESFilmic", "exposure": 0.0},
         "rendererVersion": "browser-render-bridge-required-v2", "resolution": {"width": 1024, "height": 1024},
@@ -362,8 +362,8 @@ def evaluate_glove_review(manifest: dict[str, Any], artifacts: dict[str, Any], s
     failed: list[str] = []
     if manifest.get("itemFamily") != "glove":
         failed.append(f"unsupported-family:{manifest.get('itemFamily', 'missing')}")
-    if manifest.get("subtype") != "sport-gloves":
-        failed.append(f"unsupported-subtype:{manifest.get('subtype', 'missing')}")
+    if not manifest.get("subtype"):
+        failed.append("unsupported-subtype:missing")
     failed.extend(f"intake:{error}" for error in glove_manifest_errors(manifest, require_complete_views=True))
     failed.extend(f"coverage:{error}" for error in glove_readiness_errors(manifest.get("extensions", {}).get("glove")))
     bundle: dict[str, Any] = {}

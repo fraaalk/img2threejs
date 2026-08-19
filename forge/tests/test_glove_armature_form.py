@@ -238,6 +238,44 @@ class GloveArmatureFormTests(unittest.TestCase):
             f"only {protrusion['present']} stand clear; fractions {protrusion['protrudingFraction']}",
         )
 
+    def test_an_open_cut_digit_ends_flat_and_a_closed_one_does_not(self):
+        """The predicate for "half-finger", measured from the FIELD rather than declared.
+
+        Nothing asserted this before. `open-cut` had been a legal value in
+        `glove_contracts.VALID_OPENING_KINDS` since before any builder could produce one, and the only
+        references to it anywhere in the suite were intake-contract assertions on a hand-built record that
+        never reach geometry -- so a builder that quietly capped every digit would have passed.
+
+        What separates the two is not the digit's LENGTH, which the plate sets either way. It is the
+        cross-section on the way to the end: a capsule's cap tapers to nothing, a cut ends at full width.
+        """
+        openings = {digit: "open-cut" for digit in ("index", "middle", "ring", "pinky")}
+        cut = build_glove_sdf_descriptor(
+            self.measured, hand="left", source_view_id="glove-view-1-dorsal", digit_openings=openings
+        )["sdf"]
+        cut_sdf = sample_sdf(cut)
+        tip = next(item for item in cut["primitives"] if item["id"] == "middle-digit-tip")
+        x = tip["transform"]["translation"][0]
+        probe = float(tip["radius"]) * 0.2
+
+        def profile(field, body):
+            """(top of the digit, widths at three depths below it) along the middle digit's own column."""
+            step = (body["bounds"]["max"][1] - body["bounds"]["min"][1]) / 400.0
+            column = [body["bounds"]["min"][1] + step * index for index in range(401)]
+            solid = [y for y in column if field((x, y, 0.0)) < 0.0]
+            top = max(solid)
+            widths = []
+            for depth in (probe * 0.25, probe, probe * 2.0):
+                span = [k for k in range(-40, 41) if field((x + k * probe / 8.0, top - depth, 0.0)) < 0.0]
+                widths.append((max(span) - min(span)) * probe / 8.0 if span else 0.0)
+            return top, widths
+
+        cut_top, cut_widths = profile(cut_sdf, cut)
+        capped_top, capped_widths = profile(self.sdf, self.body)
+        self.assertLess(min(cut_widths), max(cut_widths) * 1.02, f"an open cut should not taper: {cut_widths}")
+        self.assertGreater(max(capped_widths), min(capped_widths) * 1.15, f"a cap should taper: {capped_widths}")
+        self.assertLess(cut_top, capped_top, "the cut removes the cap, so the digit ends lower")
+
     def test_consecutive_palm_slices_overlap_by_more_than_a_cell(self):
         """The palm is a stack of slices, and an overlap thinner than a cell welds rather than joins.
 

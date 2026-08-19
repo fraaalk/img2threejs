@@ -1,6 +1,20 @@
-# Three.js Object Sculptor scripts have NO third-party dependencies.
-# Everything uses the Python 3.10+ standard library only (json, argparse, struct,
-# zlib, pathlib, math, subprocess). PNG maps and comparison sheets are written with
-# struct/zlib directly — no Pillow/numpy/OpenCV/Playwright required.
+# Runtime dependencies for the img2threejs forge.
+#
+# This file used to state that the scripts have NO third-party dependencies and that
+# "no Pillow/numpy/OpenCV/Playwright required". That was untrue and had been for some time:
+# `forge/stage4_review/glove_review.py`, `glove_capture_evidence.py` and `stage3_build/glove_shell.py`
+# import PIL, and the glove review harness drives a real browser through Playwright. Claiming otherwise
+# made a green run on a machine that happened to have them look like proof the pipeline was stdlib-only.
+#
+# Most of the pipeline IS stdlib-only -- PNG maps and comparison sheets are written with struct/zlib
+# directly, and there is no numpy or OpenCV anywhere. What follows is the actual surface.
 #
 # Requires: python >= 3.10
+
+# Image decode for review masks, capture verification and the shell atlas bake.
+Pillow>=10.0
+
+# Browser capture for the glove review runtime. Needed only by the capture/e2e path
+# (`scripts/capture_threejs_playwright.py`, `forge/tests/run_glove_e2e.py`,
+# `forge/tests/run_glove_item.py`); the structural tests run without it.
+playwright>=1.40

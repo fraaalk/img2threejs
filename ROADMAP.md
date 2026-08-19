@@ -19,20 +19,25 @@ can plan around.
 
 ### Wearable track (`wearable-v1.0`) — diagnostic, in progress
 
-CS2 static full-finger Sport Gloves route through `wearable-v1.0` / `cs2-glove-v1`. The review layer
-is hardened — nine independent measurements, typed thresholds read from the calibrated scene, a
-surface contract that measures per-hand separation, every failure named and fail-closed — but the
-track is **diagnostic-only** and cannot return `ready`. Two follow-ups remain, both blocked on work
-upstream of the review layer:
+**Every CS2 glove subtype** routes through `wearable-v1.0` / `cs2-glove-v1`. Subtype is no longer an
+admission decision anywhere in the track — `sport-gloves` was the pilot that proved the gates and its
+allowlist is gone; what refuses now is capability, named. Half-finger digits are real geometry
+(`open-cut`, a subtracted cap), a single declared hand is admitted without a derived mirror, and a
+marketplace composite is split into per-role plates with the crop and backdrop replacement recorded.
+The review layer is hardened — nine independent measurements, typed thresholds read from the calibrated
+scene, a surface contract that measures per-hand separation, every failure named and fail-closed — but
+the track is **diagnostic-only** and cannot return `ready`: depth is still an anthropometric prior,
+because two front-axis plates carry none. Two follow-ups remain:
 
 - **`glove-artifact-negative-suite`** — artifact-level seeded negatives need a test-only cascade
   re-signing helper, because most mutations trip the digest layer before reaching the gate under
   test. Function-level gate isolation covers the review rules in the meantime.
 - **`glove-reference-conformance`** — the track makes **no claim about resemblance to the reference
-  image**. Blocked on two upstream defects: the azimuth-90 capture renders the flat panel slabs
-  edge-on, and the fixture's four per-role plates are not distinguishable from each other (0.58–0.82
-  silhouette IoU pairwise), so no silhouette- or gradient-based signal can separate a correct pairing
-  from a wrong one. Panel geometry is still a fixed template, not image-derived.
+  image**, and that is now a measured decision. Against the real Hedge Maze plate the panel-era slab
+  geometry the docs record as fundamentally wrong scores bbox-normalised silhouette IoU 0.8656 where the
+  correct hand armature scores 0.6559; normalising away scale and translation does not reverse it,
+  because silhouette inflation traces the plate's outline by construction. A gate on these signals would
+  rank the wrong model first. The change is drafted with the experiments a usable signal must pass first.
 
 ### v1.2 — Humanoid character generator
 

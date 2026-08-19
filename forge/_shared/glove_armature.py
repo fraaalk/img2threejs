@@ -94,6 +94,11 @@ PROFILE_SLICE_OVERLAP_CELLS = 2.0
 # palm width that does not shrink with the grid at all.
 MIN_THUMB_RADIUS_CELLS = 2.0
 DEFAULT_RESOLUTION = 64
+# Comfortably larger than the unit frame in every direction, so the cutter's own faces never land inside it.
+CUT_BOX_SPAN = 4.0
+# The digit endings the armature can build. `closed-tip` is a capsule's own cap; `open-cut` is that cap
+# subtracted away. `grouped-chamber` (a mitten) has no digit to cut and is refused rather than approximated.
+BUILDABLE_OPENINGS = frozenset({"closed-tip", "open-cut"})
 
 
 def _capsule(part_id: str, *, radius: float, height: float, translation: list[float], rotation: list[float]) -> dict[str, Any]:
@@ -111,6 +116,10 @@ def _content_extents(primitives: list[dict[str, Any]]) -> list[list[float]]:
     extents = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
     for primitive in primitives:
         offset = primitive.get("transform", {}).get("translation", [0.0, 0.0, 0.0])
+        # A cutter is subtracted, so it can only ever shrink the solid. Letting its reach into the bounds
+        # would size the grid around a box that is deliberately larger than the frame.
+        if primitive["type"] == "box":
+            continue
         if primitive["type"] == "ellipsoid":
             reach = list(primitive["radii"])
         else:
@@ -131,10 +140,16 @@ def build_glove_sdf_descriptor(
     source_view_id: str,
     resolution: int = DEFAULT_RESOLUTION,
     depth_source: str | None = None,
+    digit_openings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Fit palm, four fingers, an opposed thumb and a cuff to the measured outline."""
     if hand not in {"left", "right"}:
         raise ValueError(f"hand must be left or right, not {hand!r}")
+    openings = dict(digit_openings or {})
+    unbuildable = sorted(f"{digit}={kind!r}" for digit, kind in openings.items() if kind not in BUILDABLE_OPENINGS)
+    if unbuildable:
+        # Named, not silently approximated: a mitten built as separate digits is a different glove.
+        raise ValueError("the armature cannot build these digit openings: " + ", ".join(unbuildable))
     aspect = float(measured["aspect"])
     finger_band = float(measured.get("fingerBandFraction", 0.37))
     if not 0.05 < finger_band < 0.9:
@@ -304,9 +319,20 @@ def build_glove_sdf_descriptor(
         pair = radii[index] + radii[index + 1]
         if pair > 0.0:
             knuckle_scale = max(knuckle_scale, (spacing + cell) / pair)
+    # Where each open-cut digit's rounded cap begins, which is where the cut face goes. The capsule's axis
+    # ends at `tips - tip_radius` and the cap carries it the last `tip_radius`, so cutting there leaves the
+    # digit at exactly the length the plate measured, ending flat at full width.
+    cut_planes: dict[str, float] = {}
+    cut_widths: dict[str, float] = {}
+    cut_centres: dict[str, float] = {}
     for index, digit in enumerate(ordered):
         radius = radii[index] * knuckle_scale
         tip_radius = tip_radii[index]
+        if openings.get(digit) == "open-cut":
+            cut_planes[digit] = tips[index] - tip_radius
+            # Wide enough to clear the digit's widest segment with room for its forward tilt, and no wider.
+            cut_widths[digit] = max(radius, tip_radius) * 2.0
+            cut_centres[digit] = mirror * centres[index]
         # TWO segments per digit, because a digit tapers and the taper is what lets neighbours separate.
         # Measured on the real plate the gap between two digits at their WIDEST is 0.1 to 0.9 of a grid cell
         # -- sub-cell, unrepresentable, and the reason a row of equal cylinders fused into a mitten -- while a
@@ -447,13 +473,63 @@ def build_glove_sdf_descriptor(
     # each other so the gap between them stays a gap.
     digit_ids = [combine(f"{digit}-taper", [f"{digit}-digit", f"{digit}-digit-tip"], "smooth-union", tip_radii[0] * 0.5)
                  for digit in DIGITS]
-    digits = combine("digit-row", digit_ids, "union")
+    # A half-finger glove ends its digits in a CUT, not a rounded tip, and a rounded tip is the only thing a
+    # capsule can end in. The cut is `subtract` with a box -- an operation and a primitive all three
+    # implementations already carry (`sdf_primitives.py:9,13`, `generate_threejs_factory`, `sdf.mjs`), so a
+    # closed-tip digit emits exactly the descriptor it emitted before and no port needs a coordinated edit.
+    #
+    # ponytail: the cutter is axis-aligned in y while the digits curl forward by DIGIT_FORWARD_TILT, so the
+    # cut face is very slightly oblique to the digit's own axis. At the tilt this armature uses that is under
+    # a tenth of a tip radius. Orient the box by the digit's rotation if the tilt ever grows.
+    cut_ids: list[str] = []
+    for digit, taper in zip(DIGITS, digit_ids):
+        plane = cut_planes.get(digit)
+        if plane is None:
+            cut_ids.append(taper)
+            continue
+        cutter = f"{digit}-cut"
+        # Bounded to its OWN digit across x. A cutter spanning the frame is conservative at this digit
+        # spacing -- it only ever removes material above a cut plane, and the form gate reads it as another
+        # part, which lowered every digit's protruding fraction rather than raising it (0.65 to 0.567 on the
+        # index, measured). But "conservative at this spacing" is not a property to rely on: bring the digits
+        # closer, as a mitten or a tight fingerless profile does, and one digit's cutter starts reaching into
+        # its neighbours. Bounding it costs two numbers and removes the coupling.
+        half_width = cut_widths[digit]
+        primitives.append({
+            "id": cutter, "type": "box",
+            "size": [round(2.0 * half_width, 6), round(CUT_BOX_SPAN, 6), round(CUT_BOX_SPAN, 6)],
+            "transform": {"translation": [round(cut_centres[digit], 6), round(plane + CUT_BOX_SPAN / 2.0, 6), 0.0]},
+        })
+        operations.append({"id": f"{digit}-open-cut", "type": "subtract", "left": taper, "right": cutter})
+        cut_ids.append(f"{digit}-open-cut")
+    digits = combine("digit-row", cut_ids, "union")
     hand = combine("knuckles", [palm, digits], "smooth-union", fillet)
     # The thumb web is a broad transition on a real hand, and it has to be broad here for a second
     # reason: a fillet narrower than the gap between the thumb and the palm leaves them nearly-touching
     # rather than merged, which is the same sub-cell pinch the digit gaps had. Measured at resolution 64,
     # the small fillet left two non-manifold edges between `thumb-digit` and the palm slices.
-    combine("thumb-web", [hand, "thumb-digit"], "smooth-union", thumb_radius * THUMB_WEB_OF_RADIUS)
+    # The thumb is a digit and its declared opening is its own. It is built outside the `DIGITS` loop, so an
+    # earlier version of this cut silently ignored `openings["thumb"]` and shipped a closed thumb on a glove
+    # whose observation said open-cut -- the exact "silently wrong rather than refused" failure the capability
+    # guard exists to prevent, one layer below where that guard looks.
+    thumb_part = "thumb-digit"
+    if openings.get("thumb") == "open-cut":
+        # The capsule's axis ends at `distal`; the cap carries the solid one radius further along it, so the
+        # cut goes at the axis end and the thumb keeps the length the plate measured.
+        axis_length = math.sqrt(sum(component * component for component in span_vector)) or 1.0
+        direction = [component / axis_length for component in span_vector]
+        cut_centre = [distal[axis] + direction[axis] * CUT_BOX_SPAN / 2.0 for axis in range(3)]
+        primitives.append({
+            "id": "thumb-cut", "type": "box",
+            "size": [round(CUT_BOX_SPAN, 6)] * 3,
+            "transform": {
+                "translation": [round(value, 6) for value in cut_centre],
+                "rotation": [round(value, 6) for value in thumb_rotation],
+            },
+        })
+        operations.append({"id": "thumb-open-cut", "type": "subtract", "left": "thumb-digit", "right": "thumb-cut"})
+        thumb_part = "thumb-open-cut"
+    combine("thumb-web", [hand, thumb_part], "smooth-union", thumb_radius * THUMB_WEB_OF_RADIUS)
 
     # Bounds hug the content instead of being a cube around the longest reach. A cube wastes most of
     # its cells on empty space, and the gap between two digits is only a fraction of a finger

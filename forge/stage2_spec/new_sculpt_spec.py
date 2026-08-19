@@ -1727,22 +1727,55 @@ def _sport_glove_hand_nodes(side: str, center_x: float, palette: dict[str, str])
     return nodes
 
 
+# Defaults, not an allowlist: used only when a caller supplies nothing, so legacy specs keep their shape.
+DEFAULT_GLOVE_SUBTYPE = "sport-gloves"
+DEFAULT_GLOVE_FORM_PROFILE = "full-finger"
+
+
 def make_glove_component_tree(subtype: str | None = None, *, materials: dict[str, str] | None = None) -> list:
-    if subtype and subtype != "sport-gloves":
-        raise ValueError(f"unsupported glove subtype {subtype!r}")
     palette = {"palm": "glove-leather", "dorsal": "glove-textile", "thumb": "glove-textile", "green": "glove-textile", "mint": "glove-guard", "grey": "glove-leather", "closure": "glove-closure"}
     palette.update(materials or {})
-    root = _cnode("root", "Sport Gloves pair (root)", "box", None, (0, 0, 0), (0.01, 0.01, 0.01), material="hidden", role="body", level="macro", importance=1.0, anim_role="root", topology_class="material-only", topology_rationale="The root is an invisible organizing pivot; glove surfaces are owned by volumetric children.")
+    label = f"{subtype or DEFAULT_GLOVE_SUBTYPE} pair (root)"
+    root = _cnode("root", label, "box", None, (0, 0, 0), (0.01, 0.01, 0.01), material="hidden", role="body", level="macro", importance=1.0, anim_role="root", topology_class="material-only", topology_rationale="The root is an invisible organizing pivot; glove surfaces are owned by volumetric children.")
     return [root, *_sport_glove_hand_nodes("left", -0.48, palette), *_sport_glove_hand_nodes("right", 0.48, palette)]
 
 
-def apply_glove_pair_layout(spec: dict) -> dict:
-    """Upgrade a legacy glove spec to the reusable volumetric full-finger pair layout."""
+def glove_layout_from_extension(extension: dict | None, subtype: str | None = None) -> dict:
+    """Build `gloveLayout` from what intake OBSERVED, never from a literal.
+
+    This used to hardcode `formProfile: "full-finger"`, `hands: ["left", "right"]` and a
+    subtype-specific version string, one line below a component tree built from a hardcoded
+    `"sport-gloves"`. The vocabulary for the other cases already existed and was unreachable:
+    `glove_contracts.VALID_FORM_PROFILES` admits `fingerless` and `mitten`, and
+    `glove_assembly` emits their panels -- but nothing downstream ever saw the observation,
+    because this line overwrote it before stage 3 read it.
+    """
+    profile = (extension or {}).get("formProfile")
+    profile = profile if isinstance(profile, dict) else {}
+    kind = profile.get("kind") if isinstance(profile.get("kind"), str) else None
+    digits = profile.get("digitTopology")
+    hands = (extension or {}).get("hands")
+    if not (isinstance(hands, list) and hands):
+        # The pair is what a CS2 plate ships and what the pilot assumed; a single-hand item declares
+        # its hand and that declaration is carried by `glove-single-hand-intake`.
+        hands = ["left", "right"]
+    return {
+        "version": f"{subtype or DEFAULT_GLOVE_SUBTYPE}-volumetric-pair.v1",
+        "formProfile": kind or DEFAULT_GLOVE_FORM_PROFILE,
+        "formProfileSource": "observed" if kind else "default",
+        "digitTopology": digits if isinstance(digits, list) and digits else "two-segment-curved-digits",
+        "hands": list(hands),
+        "evidencePolicy": "generic geometry; source-specific finish remains material-evidence-bound",
+    }
+
+
+def apply_glove_pair_layout(spec: dict, *, subtype: str | None = None, glove_extension: dict | None = None) -> dict:
+    """Upgrade a legacy glove spec to the reusable volumetric pair layout."""
     material_ids = {item.get("id") for item in spec.get("materials", []) if isinstance(item, dict)}
     observed = {"hedge-dorsal-carbon", "hedge-mint-guard", "hedge-green-dorsal", "hedge-palm-grey", "hedge-green-palmar", "hedge-closure"}
     palette = None if not observed.issubset(material_ids) else {"palm": "hedge-palm-grey", "dorsal": "hedge-dorsal-carbon", "thumb": "hedge-green-palmar", "green": "hedge-green-dorsal", "mint": "hedge-mint-guard", "grey": "hedge-palm-grey", "closure": "hedge-closure"}
-    spec["componentTree"] = make_glove_component_tree("sport-gloves", materials=palette)
-    spec["gloveLayout"] = {"version": "sport-glove-volumetric-pair.v1", "formProfile": "full-finger", "digitTopology": "two-segment-curved-digits", "hands": ["left", "right"], "evidencePolicy": "generic geometry; source-specific finish remains material-evidence-bound"}
+    spec["componentTree"] = make_glove_component_tree(subtype, materials=palette)
+    spec["gloveLayout"] = glove_layout_from_extension(glove_extension, subtype)
     return spec
 
 
@@ -1757,10 +1790,8 @@ def make_glove_feature_targets() -> list:
     ]
 
 
-def apply_glove_template(spec: dict, *, subtype: str = "sport-gloves", manifest: dict | None = None) -> dict:
-    if subtype != "sport-gloves":
-        raise ValueError(f"unsupported glove subtype {subtype!r}")
-    apply_glove_pair_layout(spec)
+def apply_glove_template(spec: dict, *, subtype: str = DEFAULT_GLOVE_SUBTYPE, manifest: dict | None = None) -> dict:
+    apply_glove_pair_layout(spec, subtype=subtype, glove_extension=(manifest or {}).get("extensions", {}).get("glove"))
     root = next(component for component in spec["componentTree"] if component.get("id") == "root")
     root["topologyClass"] = "material-only"
     root["topologyRationale"] = "The root is an invisible organizing pivot; authoritative glove surfaces are owned by panel children."
@@ -1891,7 +1922,7 @@ def apply_cs2_template(
     descriptor tier; resolve_cs2_finish_style() applies identity precedence against skin_name /
     vision when finish_style is not itself given."""
     if item_family == "glove":
-        return apply_glove_template(spec, subtype=subtype or "sport-gloves")
+        return apply_glove_template(spec, subtype=subtype or DEFAULT_GLOVE_SUBTYPE)
     resolved_style, conflicts = resolve_cs2_finish_style(
         finish_style, skin_name, vision_finish_style, vision_confidence
     )
@@ -2785,7 +2816,7 @@ def main(argv: list[str]) -> int:
         if manifest.get("state") != "proceed":
             parser.error(f"CS2 intake is not ready for spec authoring: {manifest.get('state', 'unknown')}")
         if manifest.get("itemFamily") not in {"knife", "rifle", "glove"}:
-            parser.error("CS2 spec authoring supports only activated knife, rifle, and sport-gloves families")
+            parser.error("CS2 spec authoring supports only the activated knife, rifle, and glove families")
     spec = make_spec(args.target_name, args.images[0] if args.images else None, assessment)
     domain = None
     cs2_marker = False
@@ -2821,7 +2852,7 @@ def main(argv: list[str]) -> int:
         if routing["status"] != "resolved":
             parser.error("pipeline routing requires input: " + "; ".join(routing["conflicts"]))
     if routing is not None and routing["track"] == "wearable-v1.0":
-        apply_glove_template(spec, subtype=str(manifest.get("subtype", "sport-gloves")) if manifest else "sport-gloves", manifest=manifest)
+        apply_glove_template(spec, subtype=str((manifest or {}).get("subtype") or DEFAULT_GLOVE_SUBTYPE), manifest=manifest)
         if manifest:
             apply_cs2_manifest_evidence(spec, manifest)
     elif routing is not None and routing["track"] == "weapon-v1.4":

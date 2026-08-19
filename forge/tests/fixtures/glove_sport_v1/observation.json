@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "target": "Sport Gloves | Golden Fixture",
+  "purpose": "Generated with the fixture plates so every sourceHash matches by construction.",
+  "formProfile": {
+    "kind": "full-finger",
+    "classificationState": "observed",
+    "digitTopology": [
+      {
+        "id": "thumb",
+        "opening": "closed-tip",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "index",
+        "opening": "closed-tip",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "middle",
+        "opening": "closed-tip",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "ring",
+        "opening": "closed-tip",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "pinky",
+        "opening": "closed-tip",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      }
+    ],
+    "openingPolicy": {
+      "allowedBoundaryKinds": [
+        "cuff"
+      ]
+    }
+  },
+  "coverageMatrix": [
+    {
+      "ownerId": "region-dorsal",
+      "sourceViewId": "glove-view-1-dorsal",
+      "sourceHash": "17989905285340760578",
+      "cropDigest": "fixture-crop-dorsal",
+      "visibility": "visible",
+      "state": "covered",
+      "renderCameras": [
+        "dorsal"
+      ]
+    },
+    {
+      "ownerId": "region-palmar",
+      "sourceViewId": "glove-view-2-palmar",
+      "sourceHash": "13670881192468585002",
+      "cropDigest": "fixture-crop-palmar",
+      "visibility": "visible",
+      "state": "covered",
+      "renderCameras": [
+        "palmar"
+      ]
+    }
+  ],
+  "surfaceRegionEvidence": [
+    {
+      "id": "dorsal-shell",
+      "sourceViewId": "glove-view-1-dorsal",
+      "sourceHash": "17989905285340760578",
+      "sourceCropDigest": "fixture-crop-dorsal",
+      "comparisonMaskDigest": "fixture-mask-dorsal",
+      "orientation": "dorsal",
+      "projectionTransform": {
+        "kind": "uv"
+      },
+      "channels": {
+        "baseColor": {
+          "source": "dorsal.png",
+          "colorSpace": "sRGB"
+        }
+      }
+    },
+    {
+      "id": "palmar-shell",
+      "sourceViewId": "glove-view-2-palmar",
+      "sourceHash": "13670881192468585002",
+      "sourceCropDigest": "fixture-crop-palmar",
+      "comparisonMaskDigest": "fixture-mask-palmar",
+      "orientation": "palmar",
+      "projectionTransform": {
+        "kind": "uv"
+      },
+      "channels": {
+        "baseColor": {
+          "source": "palmar.png",
+          "colorSpace": "sRGB"
+        }
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "fixture-observation",
+      "sourceRefs": [
+        "glove-view-1-dorsal",
+        "glove-view-2-palmar"
+      ],
+      "region": "shell-and-hand-anatomy",
+      "visibility": "multi-view",
+      "epistemicState": "observed",
+      "confidence": 0.9,
+      "contradictions": []
+    }
+  ],
+  "sourceUse": {
+    "glove-view-1-dorsal": "target-geometry-and-surface",
+    "glove-view-2-palmar": "target-geometry-and-surface",
+    "glove-view-3-thumb-side-profile": "technical-geometry-only",
+    "glove-view-4-three-quarter": "technical-geometry-only"
+  }
+}

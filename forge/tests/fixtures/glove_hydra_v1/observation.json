@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "target": "Hydra Gloves | Case Hardened (Factory New)",
+  "purpose": "Half-finger, single left hand, split from one marketplace composite.",
+  "formProfile": {
+    "kind": "fingerless",
+    "classificationState": "observed",
+    "digitTopology": [
+      {
+        "id": "index",
+        "opening": "open-cut",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "middle",
+        "opening": "open-cut",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "ring",
+        "opening": "open-cut",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "pinky",
+        "opening": "open-cut",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      },
+      {
+        "id": "thumb",
+        "opening": "open-cut",
+        "path": "curved",
+        "evidenceRefs": [
+          "glove-view-1-dorsal",
+          "glove-view-2-palmar"
+        ]
+      }
+    ],
+    "openingPolicy": {
+      "allowedBoundaryKinds": [
+        "cuff",
+        "open-cut"
+      ]
+    }
+  },
+  "hands": [
+    "left"
+  ],
+  "coverageMatrix": [
+    {
+      "ownerId": "region-dorsal",
+      "sourceViewId": "glove-view-1-dorsal",
+      "sourceHash": "18419980163093209088",
+      "cropDigest": "hydra-crop-dorsal",
+      "visibility": "visible",
+      "state": "covered",
+      "renderCameras": [
+        "dorsal"
+      ]
+    },
+    {
+      "ownerId": "region-palmar",
+      "sourceViewId": "glove-view-2-palmar",
+      "sourceHash": "18434582195150618624",
+      "cropDigest": "hydra-crop-palmar",
+      "visibility": "visible",
+      "state": "covered",
+      "renderCameras": [
+        "palmar"
+      ]
+    }
+  ],
+  "surfaceRegionEvidence": [
+    {
+      "id": "dorsal-shell",
+      "sourceViewId": "glove-view-1-dorsal",
+      "sourceHash": "18419980163093209088",
+      "sourceCropDigest": "hydra-crop-dorsal",
+      "comparisonMaskDigest": "hydra-mask-dorsal",
+      "orientation": "dorsal",
+      "projectionTransform": {
+        "kind": "uv"
+      },
+      "channels": {
+        "baseColor": {
+          "source": "dorsal.png",
+          "colorSpace": "sRGB"
+        }
+      }
+    },
+    {
+      "id": "palmar-shell",
+      "sourceViewId": "glove-view-2-palmar",
+      "sourceHash": "18434582195150618624",
+      "sourceCropDigest": "hydra-crop-palmar",
+      "comparisonMaskDigest": "hydra-mask-palmar",
+      "orientation": "palmar",
+      "projectionTransform": {
+        "kind": "uv"
+      },
+      "channels": {
+        "baseColor": {
+          "source": "palmar.png",
+          "colorSpace": "sRGB"
+        }
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "hydra-observation",
+      "sourceRefs": [
+        "glove-view-1-dorsal",
+        "glove-view-2-palmar"
+      ],
+      "region": "shell-and-hand-anatomy",
+      "visibility": "multi-view",
+      "epistemicState": "observed",
+      "confidence": 0.85,
+      "contradictions": []
+    }
+  ],
+  "sourceUse": {
+    "glove-view-1-dorsal": "target-geometry-and-surface",
+    "glove-view-2-palmar": "target-geometry-and-surface"
+  }
+}

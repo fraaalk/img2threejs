@@ -89,6 +89,11 @@ def apply_glove_observation(manifest: dict[str, Any], observation: dict[str, Any
     result = copy.deepcopy(manifest)
     glove = result["extensions"]["glove"]
     glove["formProfile"] = copy.deepcopy(observation["formProfile"])
+    # Declared hands, when the observation states them. A listing photograph of one glove is a legitimate
+    # source and there is no way to read "one or two" off the plate: the silhouette measurement takes the
+    # largest component either way, so a pair and a single glove are indistinguishable to it.
+    if isinstance(observation.get("hands"), list) and observation["hands"]:
+        glove["hands"] = [str(hand) for hand in observation["hands"]]
     glove["coverageMatrix"] = copy.deepcopy(observation["coverageMatrix"])
     glove["surfaceRegionEvidence"] = copy.deepcopy(observation["surfaceRegionEvidence"])
     existing_evidence = glove.get("evidence", [])

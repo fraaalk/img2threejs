@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,8 +151,16 @@ _GLOVE = FamilyAdapter(
     ("panel-to-panel-seam", "finger-stall-to-fourchette", "thumb-to-palm", "cuff-to-shell", "overlay-to-shell"),
     ("dorsal", "palmar", "thumb-side-profile", "three-quarter", "left-three-quarter", "right-three-quarter", "orbit"),
 )
-SUPPORTED_GLOVE_SUBTYPES = frozenset({"sport-gloves"})
-STAGED_ADAPTERS = {"glove": (_GLOVE, SUPPORTED_GLOVE_SUBTYPES)}
+# `None` admits every subtype, and it is deliberately not an ever-growing frozenset. A glove is admitted
+# on the evidence it carries, not on its name: `sport-gloves` was only the pilot used to prove the gates.
+# What may still refuse is CAPABILITY -- an observed form profile or digit opening the builder has no path
+# for fails closed with a named error, upstream of here. A name-based allowlist cannot say that.
+ANY_SUBTYPE: Final[None] = None
+STAGED_ADAPTERS = {"glove": (_GLOVE, ANY_SUBTYPE)}
+
+
+def _admits(supported: frozenset[str] | None, subtype: str | None) -> bool:
+    return supported is None or subtype in supported
 
 
 def registered_adapter_ids(family: str, subtype: str | None = None) -> tuple[str, ...]:
@@ -166,7 +174,7 @@ def registered_adapter_ids(family: str, subtype: str | None = None) -> tuple[str
     return tuple(
         adapter_id
         for adapter_id, (adapter, supported) in _ADAPTERS_BY_ID.items()
-        if adapter.family == canonical_family and (subtype is None or subtype in supported)
+        if adapter.family == canonical_family and (subtype is None or _admits(supported, subtype))
     )
 
 
@@ -191,7 +199,7 @@ def get_family_adapter(
     if entry is None:
         raise ValueError(f"unsupported-family: {family}")
     adapter, supported = entry
-    if subtype and subtype not in supported:
+    if subtype and not _admits(supported, subtype):
         raise ValueError(f"unsupported-subtype: {subtype}")
     return adapter if subtype is None else replace(adapter, subtype=subtype, family=canonical_family)
 
@@ -205,7 +213,7 @@ def resolve_family_adapter(family: str, subtype: str | None = None, *, staged: b
     if entry is None:
         raise ValueError(f"unsupported-family: {family}")
     adapter, supported = entry
-    if subtype and subtype not in supported:
+    if subtype and not _admits(supported, subtype):
         raise ValueError(f"unsupported-subtype: {subtype}")
     return adapter if subtype is None else replace(adapter, subtype=subtype, family=family)
 

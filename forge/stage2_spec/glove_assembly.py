@@ -67,8 +67,8 @@ def build_glove_assembly(
     form_profile: str = "full-finger",
     curved_digits: bool = False,
 ) -> dict[str, Any]:
-    if subtype != "sport-gloves":
-        raise ValueError(f"unsupported glove subtype: {subtype}")
+    if not subtype:
+        raise ValueError("glove assembly requires a subtype")
     if form_profile not in {"full-finger", "fingerless", "mitten"}:
         raise ValueError(f"unsupported or unobservable glove form profile: {form_profile}")
     source_refs = source_view_ids or list(REQUIRED_GLOVE_VIEW_ROLES)

@@ -20,7 +20,10 @@ REQUIRED_GLOVE_VIEW_ROLES: Final[tuple[str, ...]] = (
 OPTIONAL_GLOVE_VIEW_ROLES: Final[frozenset[str]] = frozenset(
     {"opposite-profile", "back", "left-three-quarter", "right-three-quarter", "orbit"}
 )
-VALID_GLOVE_SUBTYPES: Final[frozenset[str]] = frozenset({"sport-gloves"})
+# There is deliberately no subtype allowlist. `sport-gloves` was the pilot used to prove the gates, and a
+# name-based list would need a commit per glove while saying nothing about whether the builder can build the
+# thing. A glove is admitted on the evidence it carries; what refuses is CAPABILITY -- an observed form
+# profile or digit opening with no implementation path -- which is checked where the geometry is built.
 VALID_FORM_PROFILES: Final[frozenset[str]] = frozenset({"full-finger", "fingerless", "mitten", "unknown"})
 VALID_OPENING_KINDS: Final[frozenset[str]] = frozenset({"closed-tip", "open-cut", "grouped-chamber", "cuff"})
 VALID_EPISTEMIC_STATES: Final[frozenset[str]] = frozenset(
@@ -42,6 +45,19 @@ def _is_finite_number(value: Any) -> bool:
 
 def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_single_hand(extension: Any) -> bool:
+    """Whether the observation declared one hand rather than a pair.
+
+    Declared, never inferred. `glove_silhouette.measure_silhouette` reads only the LARGEST foreground
+    component, so a single-glove plate and a pair plate look the same to it -- it would report one hand for
+    both. A guess here would silently halve a pair.
+    """
+    if not isinstance(extension, dict):
+        return False
+    hands = extension.get("hands")
+    return isinstance(hands, list) and len(hands) == 1
 
 
 def validate_glove_view(view: Any, *, require_admitted: bool = False) -> list[str]:
@@ -188,8 +204,8 @@ def validate_glove_extension(extension: Any, *, require_complete_views: bool = T
     if not isinstance(target, dict):
         errors.append("extensions.glove.target must be an object")
     else:
-        if target.get("subtype") not in VALID_GLOVE_SUBTYPES:
-            errors.append("extensions.glove.target.subtype must be sport-gloves")
+        if not _nonempty_string(target.get("subtype")):
+            errors.append("extensions.glove.target.subtype is required")
         if target.get("canonicalHand") != "left":
             errors.append("extensions.glove.target.canonicalHand must be left")
         if target.get("output") != "static-pair":
@@ -217,7 +233,13 @@ def validate_glove_extension(extension: Any, *, require_complete_views: bool = T
     if not isinstance(primary, str) or primary not in ids:
         errors.append("primarySourceViewId must refer to an admitted source view")
     if require_complete_views:
-        missing = sorted(set(REQUIRED_GLOVE_VIEW_ROLES) - roles)
+        # A CS2 item ships two plates and the other two required roles are filled with technical views of the
+        # same model. A single-hand listing supplies exactly the two plates and nothing else -- there is no
+        # second wear tier to borrow a thumb-side view from -- so requiring four there does not raise the
+        # evidence, it just refuses the item. Two admits, and what was supplied is recorded rather than
+        # implied: `evidenceTier` stays diagnostic either way, and the depth axis is a prior either way.
+        required = set(TARGET_REQUIRED_VIEW_ROLES) if _is_single_hand(extension) else set(REQUIRED_GLOVE_VIEW_ROLES)
+        missing = sorted(required - roles)
         if missing:
             errors.append("missing required glove view roles: " + ", ".join(missing))
     evidence = extension.get("evidence")
@@ -267,7 +289,7 @@ def glove_source_view_id(role: str, index: int) -> str:
     return f"glove-view-{index + 1}-{safe or 'reference'}"
 
 
-def build_glove_extension(source_views: list[dict[str, Any]], subtype: str = "sport-gloves") -> dict[str, Any]:
+def build_glove_extension(source_views: list[dict[str, Any]], subtype: str = "sport-gloves", *, hands: list[str] | None = None) -> dict[str, Any]:
     primary = next((view["id"] for view in source_views if view.get("role") == "dorsal"), source_views[0]["id"])
     roles = {view.get("role") for view in source_views}
     required = set(REQUIRED_GLOVE_VIEW_ROLES)
@@ -309,6 +331,7 @@ def build_glove_extension(source_views: list[dict[str, Any]], subtype: str = "sp
             "digitTopology": [{"id": "unclassified-digits", "opening": "cuff", "path": "unknown", "evidenceRefs": [primary]}],
             "openingPolicy": {"allowedBoundaryKinds": ["cuff"]},
         },
+        **({"hands": [str(hand) for hand in hands]} if hands else {}),
         "coverageMatrix": [],
         "surfaceRegionEvidence": [],
         "landmarks": [],
@@ -326,8 +349,16 @@ def glove_manifest_errors(manifest: dict[str, Any], *, require_complete_views: b
     errors: list[str] = []
     if manifest.get("itemFamily") != "glove":
         errors.append("manifest itemFamily must be glove")
-    if manifest.get("subtype") not in VALID_GLOVE_SUBTYPES:
-        errors.append("manifest subtype must be sport-gloves")
+    if not _nonempty_string(manifest.get("subtype")):
+        errors.append("manifest subtype is required")
+    else:
+        # Consistency, not an allowlist. This check used to read "must be sport-gloves", and dropping it to
+        # a presence check would lose the one thing it was actually catching: the manifest and its glove
+        # extension naming different items. Once no name is refused, divergence is the failure mode left.
+        declared = manifest.get("extensions", {}).get("glove", {})
+        target = declared.get("target") if isinstance(declared, dict) else None
+        if isinstance(target, dict) and _nonempty_string(target.get("subtype")) and target["subtype"] != manifest["subtype"]:
+            errors.append(f"extensions.glove.target.subtype {target['subtype']!r} does not match manifest subtype {manifest['subtype']!r}")
     errors.extend(validate_glove_extension(manifest.get("extensions", {}).get("glove"), require_complete_views=require_complete_views))
     if require_complete_views:
         for view in manifest.get("sourceViews", []):

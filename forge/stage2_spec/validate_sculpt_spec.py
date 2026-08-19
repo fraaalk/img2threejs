@@ -745,8 +745,8 @@ def validate_pipeline_routing_contract(spec: dict[str, Any], errors: list[str]) 
     if routing_track == "weapon-v1.4" and not legacy_cs2 and object_class.get("cs2") is not True:
         errors.append("weapon-v1.4 routing requires the CS2 weapon template")
     if routing_track == "wearable-v1.0":
-        if object_class.get("itemFamily") != "glove" or object_class.get("subtype") != "sport-gloves":
-            errors.append("wearable-v1.0 routing requires the static Sport Gloves target")
+        if object_class.get("itemFamily") != "glove" or not object_class.get("subtype"):
+            errors.append("wearable-v1.0 routing requires a glove target declaring its subtype")
         if not isinstance(spec.get("wearable"), dict) or spec["wearable"].get("template") != "glove-shell-v1":
             errors.append("wearable-v1.0 routing requires the glove-shell-v1 template")
 

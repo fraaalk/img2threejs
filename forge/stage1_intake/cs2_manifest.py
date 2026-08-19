@@ -20,7 +20,7 @@ from forge.stage1_intake.probe_image import probe
 from forge.stage2_spec.cs2_adapters import get_family_adapter
 from forge.stage1_intake.glove_contracts import (
     REQUIRED_GLOVE_VIEW_ROLES,
-    VALID_GLOVE_SUBTYPES,
+    TARGET_REQUIRED_VIEW_ROLES,
     build_glove_extension,
     glove_manifest_errors,
     glove_source_view_id,
@@ -194,6 +194,7 @@ def build_manifest(
     texture_source: str = "image-only",
     explicit_identity: dict[str, Any] | None = None,
     references: list[tuple[Path, str]] | None = None,
+    hands: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved = reference.expanduser().resolve()
     technical: dict[str, Any] = probe(resolved) if resolved.exists() else {"path": str(resolved), "warnings": ["file does not exist"]}
@@ -266,9 +267,9 @@ def build_manifest(
     if family not in SUPPORTED_FAMILIES:
         manifest["state"] = "unsupported-family"
         manifest["unsupportedReason"] = f"no adapter registered for {family}"
-    elif family == "glove" and subtype not in VALID_GLOVE_SUBTYPES:
+    elif family == "glove" and not subtype:
         manifest["state"] = "unsupported-subtype"
-        manifest["unsupportedReason"] = f"no glove adapter fixture for {subtype}"
+        manifest["unsupportedReason"] = "a glove must declare a subtype"
     elif family == "glove":
         ordered_references = references or [(reference, "dorsal")]
         glove_views = _admit_glove_views(ordered_references)
@@ -276,7 +277,7 @@ def build_manifest(
         primary = next((view for view in glove_views if view.get("role") == "dorsal"), glove_views[0])
         manifest["primarySourceViewId"] = primary["id"]
         manifest["sourceImage"] = primary["path"]
-        manifest["extensions"]["glove"] = build_glove_extension(glove_views, subtype or "sport-gloves")
+        manifest["extensions"]["glove"] = build_glove_extension(glove_views, subtype, hands=hands)
         manifest["extensions"]["glove"]["sourceViews"] = glove_views
         identity_payload = manifest.get("identity", {}).get("identity", {}) if isinstance(manifest.get("identity"), dict) else {}
         declared_hand = identity_payload.get("hand", identity_payload.get("canonicalHand")) if isinstance(identity_payload, dict) else None
@@ -287,14 +288,19 @@ def build_manifest(
             manifest["state"] = "request-input"
             manifest["unsupportedReason"] = "hand identity conflicts with canonical-left MVP"
         role_set = {view.get("role") for view in glove_views if view.get("admission") == "admitted"}
-        complete = set(REQUIRED_GLOVE_VIEW_ROLES).issubset(role_set)
-        required_views = [view for view in glove_views if view.get("role") in set(REQUIRED_GLOVE_VIEW_ROLES)]
+        # A single-hand listing supplies the two plates and nothing else: there is no second wear tier
+        # to borrow a thumb-side or three-quarter technical view from, so demanding four roles refuses
+        # the item rather than raising its evidence. The hand is DECLARED by the caller -- the
+        # silhouette measurement reads only the largest component, so it cannot tell one glove from two.
+        required_roles = set(TARGET_REQUIRED_VIEW_ROLES) if hands is not None and len(hands) == 1 else set(REQUIRED_GLOVE_VIEW_ROLES)
+        complete = required_roles.issubset(role_set)
+        required_views = [view for view in glove_views if view.get("role") in required_roles]
         if not hand_conflict and complete and all(view.get("admission") == "admitted" for view in required_views):
             manifest["state"] = "proceed"
             manifest["stagedComponentAdapter"] = "cs2-glove-v1"
         else:
             manifest["state"] = "request-input"
-            manifest["unsupportedReason"] = "glove requires all admitted dorsal/palmar/thumb-side-profile/three-quarter views"
+            manifest["unsupportedReason"] = "glove requires all admitted " + "/".join(sorted(required_roles)) + " views"
     elif not subtype:
         manifest["state"] = "unsupported-subtype"
         manifest["unsupportedReason"] = f"a subtype is required for {family}"

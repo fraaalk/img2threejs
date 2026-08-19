@@ -201,6 +201,11 @@ def build_glove_geometry(assembly: dict[str, Any]) -> dict[str, Any]:
     all_measured = [mesh["measurements"] for mesh in meshes]
     return {
         "version": "glove-geometry-report.v2",
+        # Carried from the assembly, not re-asserted: the bundle and the review both need to know which
+        # glove this is and what form it was built for, and the only honest source is what stage 2 decided.
+        "subtype": assembly.get("subtype"),
+        "formProfile": assembly.get("formProfile"),
+        "allowedBoundaryKinds": list(assembly.get("policy", {}).get("allowedBoundaryKinds", ["cuff"])),
         "evidenceTier": "diagnostic",
         "mainShellPolicy": "production-weld-required",
         "meshes": meshes,

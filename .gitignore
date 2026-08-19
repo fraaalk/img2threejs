@@ -54,6 +54,11 @@ runtime/*
 !runtime/glove-review/
 runtime/glove-review/node_modules/
 runtime/glove-review/dist/
+# runtime/glove-procedural is the spec-driven glove builder (SDF shell + optional hard parts) that
+# SKILL.md and docs/CS2_GLOVE_PROCEDURAL_RECIPE.md route to when the generated factory cannot express
+# an item -- same swallowing hazard as above.
+!runtime/glove-procedural/
+runtime/glove-procedural/node_modules/
 
 # Run-time capture output: review renders, focus shots, comparison sheets.
 # These are produced by every capture and gate run, are large, and are never inputs to a build.
@@ -69,3 +74,4 @@ docs/research/
 # session, never inputs to a build, and they carry multi-megabyte PNGs. Tuning ships with the
 # stable release, not with a beta of the scripts.
 work/
+graphify-out/

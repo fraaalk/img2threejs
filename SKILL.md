@@ -427,14 +427,28 @@ wear, roughness response, and camera framing. Every decision must be traceable t
 labelled as an approximation.
 
 The versioned CS2 family boundary covers supported **knife** subtypes, the existing **Glock-18**
-pistol adapter, and (after its evidence gates pass) static full-finger **Sport Gloves** through
-`wearable-v1.0` / `cs2-glove-v1`. Rifle, SMG, sniper, heavy, unsupported pistol, non-Sport glove
-subtypes, and unknown knife subtypes must stop with `unsupported-family` or
+pistol adapter, and **every glove subtype** through `wearable-v1.0` / `cs2-glove-v1`. Rifle, SMG,
+sniper, heavy, unsupported pistol, and unknown knife subtypes must stop with `unsupported-family` or
 `unsupported-subtype`; they must not receive another family's component tree as a generic fallback.
+
+**A glove is never gated on its name.** `sport-gloves` was the pilot used to prove the review gates and
+the allowlist that scoped it is gone -- admitting a further subtype needs no code change. What still
+refuses is **capability**: an observed `formProfile.kind` or per-digit `opening` the builder has no path
+for fails closed with a named error naming the missing capability, because the alternative to refusing on
+the name is not "accept everything", it is "silently build the wrong glove". The armature ends a digit
+`closed-tip` (a capsule's own cap) or `open-cut` (that cap subtracted away, which is what a half-finger
+glove has); `grouped-chamber` is refused. A single-hand item is admitted with its hand **declared** --
+the silhouette measurement reads only the largest foreground component, so it cannot tell one glove from
+two -- and a marketplace composite carrying several views is split into per-role plates first, with the
+crop rectangle and the backdrop replacement recorded in provenance.
 
 The `wearable-v1.0` review publishes nine independent measurements with typed thresholds read from
 the review scene, and it **makes no claim about resemblance to the reference image** — no gate
-compares the render to the reference, so the review's verdict says nothing about likeness. The
+compares the render to the reference, so the review's verdict says nothing about likeness. That is a
+measured decision, not an omission: on the real Hedge Maze plate the panel-era slab geometry the docs
+record as fundamentally wrong scores bbox-normalised silhouette IoU **0.8656** against the current hand
+armature's **0.6559**, so a silhouette-based conformance gate would rank the wrong model first. Silhouette
+inflation traces the plate's outline by construction; form is invisible to it. The
 render-vs-reference gate below is an obligation on the agent performing a reconstruction, and its
 tooling (`divine_eye`, `diagnose_render`, `make_comparison_sheet`) is not glove-specific — it is the
 wearable *review pipeline* that produces no automated resemblance measurement, not the gate that is
@@ -442,6 +456,12 @@ waived. `capture_sanity` runs there as a precondition, never as a scored metric:
 defect is a capture defect. Full gate table, the two permitted scene threshold statuses, how the hand
 armature splits what the plate observed from what a prior supplies, and the recorded known defects:
 `docs/CS2_GLOVE_WORKFLOW.md`.
+
+When the generated factory cannot express the item (its attachment solver rebuilds any attached
+component as a cylinder), build the geometry with the spec-driven builder in `runtime/glove-procedural/`
+— one SDF shell plus optional hard parts, one spec module per item — following
+`docs/CS2_GLOVE_PROCEDURAL_RECIPE.md`, and probe the field with `probe-shell.mjs` before trusting any
+render. The forge pipeline still owns intake, evidence and review.
 
 ### Do not project the reference onto a form that has not passed
 

@@ -1,9 +1,37 @@
 # CS2 Sport Gloves workflow
 
-This checkout implements a diagnostic v3 review path for one narrow target: static, full-finger
-`sport-gloves`, normalized scale, canonical-left geometry plus a mirrored right hand. It still cannot
-return `ready`: depth comes from an anthropometric prior rather than a side view, which pins
-`evidenceTier` to `diagnostic`.
+This checkout implements a diagnostic v3 review path for **any CS2 glove subtype**, normalized scale,
+full-finger or half-finger, a canonical-left pair or a single declared hand. It still cannot return
+`ready`: depth comes from an anthropometric prior rather than a side view, which pins `evidenceTier` to
+`diagnostic`.
+
+Subtype is not an admission decision anywhere in the track. `sport-gloves` was the pilot that proved the
+gates; the allowlist is gone and a new subtype needs no code change. **Capability** is what refuses: an
+observed form profile or per-digit opening the builder has no path for fails closed with a named error,
+so removing the name gate never turns a refusal into a silently wrong model.
+
+| observed | built |
+|---|---|
+| `formProfile.kind` `full-finger` / `fingerless` / `mitten` | assembly panels; `unknown` falls back to full-finger |
+| `digitTopology[].opening` `closed-tip` | the capsule's own hemispherical cap |
+| `digitTopology[].opening` `open-cut` | that cap subtracted away by a box — a digit ending flat at full width |
+| `digitTopology[].opening` `grouped-chamber` | refused, named: the armature has no path for it |
+| `hands` `["left"]` | one hand, no derived mirror, no right-hand overrides demanded |
+
+Run a real item with `forge/tests/run_glove_item.py`:
+
+```bash
+python3 forge/tests/run_glove_item.py \
+    --composite listing.png --roles dorsal palmar --hand left \
+    --subtype hydra-gloves --observation observation.json \
+    --out-dir .img2threejs/hydra-fn-v1
+```
+
+`--composite` splits one marketplace image into per-role plates first, because the same path submitted
+twice yields one pHash, sets `duplicateOfHash`, and is refused. The split records its crop rectangle and
+the backdrop it replaced with neutral white — the one pixel change it makes, and it is declared, because a
+saturated backdrop makes `build_foreground_mask` report `foregroundCoverage 1.000` and the plate is then
+rejected as not isolable. `--no-runtime` stops after the bundle, which is the fast loop.
 
 ## How the geometry is built
 
@@ -40,8 +68,21 @@ the thumb's z range sat inside the palm's -- the same plane as the fingers.
 
 **What this track does not claim.** No gate compares the render to the reference, so the review's verdict
 says nothing about whether the model resembles the reference image. `CLAUDE.md`'s screenshot gate binds the
-agent performing a reconstruction, and its tooling is not glove-specific — what is missing here is an
-*automated* resemblance measurement inside the review. See the `glove-reference-conformance` follow-up.
+agent performing a reconstruction, and its tooling is not glove-specific.
+
+That absence is now a measured decision rather than a gap waiting to be filled. Against the real Hedge Maze
+dorsal plate, with clean foreground masks on both sides:
+
+| render | raw IoU | bbox-normalised IoU | fidelity | `divine_eye` |
+|---|---|---|---|---|
+| current hand armature | 0.3007 | **0.6559** | 0.2693 | `reject` |
+| panel-era slab (`captures-v3/hero.png`) | 0.8480 | **0.8656** | 0.7494 | `low-confidence` |
+
+The panel-era geometry is the silhouette-inflation route this document records as unable to produce a hand
+at all — digits 0.13–0.18 as deep as they are wide. It wins on every signal, and normalising away scale and
+translation does not reverse it, because silhouette inflation traces the plate's outline by construction.
+A conformance gate on these signals would have passed the geometry this track spent four commits replacing.
+See the `glove-reference-conformance` change for what a usable signal would have to do first.
 
 ## Reproducible commands
 
@@ -210,7 +251,8 @@ The review publishes nine independent measurements, each named for what it measu
 
 Concerns that cannot be measured yet are published under `unmeasured` with a reason rather than as a derived
 value: `seamBoundaryCorrespondence` and `productionManifold` await a real weld stage, and
-`referenceResemblance` awaits the conformance follow-up.
+`referenceResemblance` carries the measurement above as its reason — not "not built yet", but "no threshold
+over these signals ranks a correct model first".
 
 Thresholds are typed records read from the review scene — `{"kind": "boolean", "threshold": 1.0}` or
 `{"kind": "continuous", "threshold": <value>}`. A boolean gate is compared by identity. There is no fallback

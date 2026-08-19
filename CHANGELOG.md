@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`runtime/glove-procedural/` — a spec-driven glove builder that bypasses the generator.** One SDF
+  (`shell-sdf.mjs`: cross-section-lofted palm, `smin`-blended digit/thumb capsules, tapered bores
+  subtracted) meshed with surface nets forms the organic shell; plates, emblems, spikes, cuffs and
+  straps stay meshes. A different glove is a different spec object — every hard part is optional, so
+  moto/specialist/driver subtypes are served by omission. `probe-shell.mjs` walks each digit axis and
+  fails when the wall stops short of the nominal tip or a bore never opens: it caught the bore
+  subtraction eating a quarter of every digit, a defect the render could not show because the hem ring
+  drawn at the nominal tip hid it. The workflow, with the six traps that cost the most review rounds,
+  is `docs/CS2_GLOVE_PROCEDURAL_RECIPE.md`; the worked example is `.img2threejs/hydra-ch-v1/`.
+- **Every CS2 glove subtype runs.** `sport-gloves` was the pilot that proved the review gates and its
+  allowlist was never lifted, so eleven sites refused any other glove and five more assumed the pilot
+  without checking — `new_sculpt_spec.py:1744` passed the literal `"sport-gloves"` one line above a
+  `gloveLayout` that pinned `formProfile: "full-finger"` and `hands: ["left","right"]`. Opening the
+  refusals without threading those values would have replaced an honest `unsupported-subtype` with a
+  confidently wrong model carrying a valid digest chain, so both land together. `VALID_GLOVE_SUBTYPES`
+  and `SUPPORTED_GLOVE_SUBTYPES` are **removed** rather than extended: a new subtype needs no code change.
+- **Capability refuses what the name no longer does.** `unbuildable_capabilities` fails closed with a
+  named error when an observation declares a form profile or per-digit opening the armature has no path
+  for. An unclassified profile asks for nothing — every manifest is seeded with one placeholder digit
+  `unclassified-digits` carrying `opening: "cuff"`, which is "not classified yet", not a demand.
+- **Open-cut digits are real geometry.** A half-finger digit is the same capsule with its hemispherical
+  cap subtracted by a box, so it ends flat at full width: measured on the fixture, cross-section width is
+  constant 0.110 up to the end where a capped digit tapers 0.066 → 0.094. `subtract` and `box` already
+  existed in all three implementations (`sdf_primitives.py:9,13`, `generate_threejs_factory.py:785,816`,
+  `runtime/glove-review/src/sdf.mjs:49,105`), and a `closed-tip` digit emits a byte-identical descriptor,
+  so every parity baseline is unchanged and no port needed a coordinated edit.
+- **Single-hand items.** A marketplace listing of one glove is admitted with its hand **declared** — the
+  silhouette measurement reads only the largest foreground component, so it cannot tell one glove from
+  two — and admits at two views rather than four, because there is no second wear tier to borrow a
+  technical view from. The geometry builds only the declared hands, the bundle names no derived hand,
+  and the surface contract stops reporting `hands-coincident` for a glove built exactly as declared.
+- `forge/stage1_intake/split_composite_plate.py` splits one composite image into per-role plates,
+  rejecting caption bands by shape and watermark tiles by area. Necessary, not convenience: the same path
+  submitted twice yields one pHash, sets `duplicateOfHash`, and `_paired_glove_plate_override` refuses it.
+- `forge/tests/run_glove_item.py` runs a real item end to end. `run_glove_e2e.py` is bound to the
+  synthetic fixture, so nothing in this repository had ever run a real CS2 item — and the first attempt
+  exposed three defects at once.
+- `forge/tests/fixtures/glove_hydra_v1/` — a synthetic marketplace composite: one half-finger left glove,
+  two views, a caption band, a tiled watermark. Still no game art in the repository.
+- An observation example that **exists and loads**, at `forge/tests/fixtures/glove_sport_v1/observation.json`,
+  generated with the plates so its hashes cannot drift, and a test that loads it from disk.
+
+### Fixed
+- **The documented worked example did not load, and was not in the repository.**
+  `docs/CS2_GLOVE_WORKFLOW.md` cited `.img2threejs/hedge-maze-bs-v1/glove-observation.json` as "a worked
+  example from a real reconstruction". `.img2threejs/` is gitignored, so a fresh checkout had no example
+  for the only step that can set `evidenceUse`; and the local copy raised `surfaceRegionEvidence[0] names
+  unknown source view None`, because it nested `sourceViewId` under `projectionTransform` and carried no
+  `sourceHash` against the top-level pair `glove_contracts.py:134` requires. No test loaded a file, so the
+  suite stayed green over it.
+- **The capture camera framed a fixed box.** The distance was hardcoded at `3.8`, sized for a pair, so a
+  single-hand item rendered at half size and its edge-on `thumb-side-profile` fell under
+  `build_foreground_mask`'s 0.035 coverage floor — at which point the mask falls back to whole-frame and
+  `capture_sanity` correctly reported a subject filling 1.0000 of the frame. The distance is derived from
+  the scene's own bounding sphere now.
+- `build_fixture.py` wrote machine-absolute paths into a committed `metadata.json`.
+
+### Changed
+- **`referenceResemblance` stays unmeasured, with a measurement as its reason.** An unreviewed gate in the
+  working tree scored it with `divine_eye`. Measured against the real Hedge Maze plate, the panel-era slab
+  geometry the docs record as fundamentally wrong scores bbox-normalised silhouette IoU **0.8656** where
+  the current hand armature scores **0.6559** — and normalising away scale and translation does not
+  reverse it, because silhouette inflation traces the plate's outline by construction. The gate would have
+  ranked the wrong model first, so it is retracted and the number is recorded in its place.
+
+### Added
 - `forge/tools/serve_form_review.py` serves the glove form in a browser, untextured, built by the runtime's
   own polygonizer so what is reviewed is what ships. Every form defect in this track was found by a person
   looking at the shape and missed by the numbers, and the still renders that caught two of them took a code

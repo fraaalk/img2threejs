@@ -36,6 +36,8 @@ DERIVATION_TIER = "sdf-armature-v1"
 ATLAS_PROJECTION = "atlas-front-back"
 
 
+# The armature builds four fingers plus a thumb, so five is what a glove with every digit has. It is a
+# DEFAULT, not a constant of the domain: an observation that declares four digits is judged against four.
 REQUIRED_DIGITS = 5
 # Points sampled on each digit's own surface: rings around the distal half of its axis, plus the tip.
 DIGIT_RING_SAMPLES = 12
@@ -46,7 +48,7 @@ DIGIT_AXIAL_SAMPLES = 5
 MIN_PROTRUDING_FRACTION = 0.25
 
 
-def measure_digit_protrusion(descriptor: dict[str, Any]) -> dict[str, Any]:
+def measure_digit_protrusion(descriptor: dict[str, Any], required: int = REQUIRED_DIGITS) -> dict[str, Any]:
     """Count the digits the FORM actually has, by asking whether each one's surface is outside the rest.
 
     A glove has five. Counting them from a textured render is worse than useless: the palmar plate has the
@@ -114,7 +116,7 @@ def measure_digit_protrusion(descriptor: dict[str, Any]) -> dict[str, Any]:
     return {
         "status": "measured",
         "value": float(len(present)),
-        "required": float(REQUIRED_DIGITS),
+        "required": float(required),
         "present": present,
         "protrudingFraction": fractions,
         "margin": round(margin, 6),
@@ -146,6 +148,10 @@ def _measure_minimum_thickness(descriptor: dict[str, Any]) -> float:
     """
     thinnest = math.inf
     for primitive in descriptor["primitives"]:
+        # A cutter is subtracted, so it contributes no material and its own size is not a thickness. Reading
+        # it here would report the cut box's span as the thinnest part of the hand.
+        if primitive["type"] == "box":
+            continue
         if primitive["type"] == "ellipsoid":
             thinnest = min(thinnest, 2.0 * min(primitive["radii"]))
         else:
@@ -161,10 +167,12 @@ def _hand_mesh(
     material: str,
     resolution: int,
     depth_source: str | None,
+    digit_openings: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Polygonize one hand and shape it into the mesh record stage 4 reviews."""
     descriptor = build_glove_sdf_descriptor(
-        measured, hand=hand, source_view_id=source_view_id, resolution=resolution, depth_source=depth_source
+        measured, hand=hand, source_view_id=source_view_id, resolution=resolution, depth_source=depth_source,
+        digit_openings=digit_openings,
     )
     body = descriptor["sdf"]
     aspect = float(measured["aspect"])
@@ -261,15 +269,25 @@ def build_glove_armature_geometry(
     palmar_reference: Path | None = None,
     palmar_source_view_id: str | None = None,
     atlas_output: Path | None = None,
+    digit_openings: dict[str, str] | None = None,
+    hands: tuple[str, ...] = ("left", "right"),
+    required_digits: int = REQUIRED_DIGITS,
 ) -> dict[str, Any]:
-    """Fit a hand armature to the admitted outline and report both hands with their descriptors."""
+    """Fit a hand armature to the admitted outline and report the declared hands with their descriptors.
+
+    A CS2 item ships a pair and that is the default. A marketplace listing of ONE glove is a legitimate
+    source and building a pair from it invents a second glove nobody photographed -- and then renders it,
+    which is how a single-hand item ends up compared against a two-hand capture.
+    """
+    if not hands or any(hand not in {"left", "right"} for hand in hands):
+        raise ValueError(f"hands must be a non-empty subset of left/right, not {hands!r}")
     _grid_mask, measured = measure_silhouette(reference)
     meshes: list[dict[str, Any]] = []
     descriptors: dict[str, Any] = {}
-    for hand in ("left", "right"):
+    for hand in hands:
         record, descriptor = _hand_mesh(
             measured, hand=hand, source_view_id=source_view_id, material=material,
-            resolution=resolution, depth_source=depth_source,
+            resolution=resolution, depth_source=depth_source, digit_openings=digit_openings,
         )
         meshes.append(record)
         descriptors[hand] = descriptor
@@ -287,8 +305,8 @@ def build_glove_armature_geometry(
     # becomes invisible. That is not hypothetical: a thumb fused into the palm survived a dozen textured
     # renders here, and it took an untextured one to see. Withholding the projection makes the deception
     # structurally impossible rather than something a reviewer has to remember to look past.
-    protrusion = {hand: measure_digit_protrusion(descriptor["sdf"]) for hand, descriptor in descriptors.items()}
-    form_ready = all(entry["value"] >= REQUIRED_DIGITS for entry in protrusion.values())
+    protrusion = {hand: measure_digit_protrusion(descriptor["sdf"], required_digits) for hand, descriptor in descriptors.items()}
+    form_ready = all(entry["value"] >= required_digits for entry in protrusion.values())
     project = atlas_output is not None and form_ready
     return {
         "version": SHELL_VERSION,
@@ -335,7 +353,7 @@ def build_glove_armature_geometry(
         "surfaceProjectionWithheld": None if project or atlas_output is None else {
             "reason": "form-gate:digit-count",
             "measured": {hand: entry["value"] for hand, entry in protrusion.items()},
-            "required": float(REQUIRED_DIGITS),
+            "required": float(required_digits),
             "note": (
                 "the plates are not projected until the form has five separate digits, because the palmar "
                 "plate paints the item's own thumb across its palm and a four-digit model wearing it reads "
@@ -343,7 +361,7 @@ def build_glove_armature_geometry(
             ),
         },
         # One descriptor per hand, because each hand is its own implicit solid placed in its own bounds.
-        "geometryDescriptor": {"armature": {"left": descriptors["left"], "right": descriptors["right"]}},
+        "geometryDescriptor": {"armature": dict(descriptors)},
         "derivation": {
             "tier": DERIVATION_TIER,
             "sourceViewIds": [source_view_id],
@@ -377,7 +395,7 @@ def build_glove_armature_geometry(
             "digitProtrusion": {
                 "status": "measured",
                 "value": float(min(entry["value"] for entry in protrusion.values())),
-                "required": float(REQUIRED_DIGITS),
+                "required": float(required_digits),
                 "perHand": protrusion,
             },
         },

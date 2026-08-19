@@ -1,0 +1,59 @@
+{
+  "version": "composite-split-v1",
+  "plates": [
+    {
+      "role": "dorsal",
+      "path": "forge/tests/fixtures/glove_hydra_v1/plates/dorsal.png",
+      "sourceImage": "forge/tests/fixtures/glove_hydra_v1/composite.png",
+      "sourceSha256": "191b270558c4671c7644ab0e0832d4d1569999290fe6c597bfb594b253e8dbe0",
+      "cropRect": {
+        "x": 85,
+        "y": 85,
+        "width": 174,
+        "height": 246
+      },
+      "cropSha256": "64bf31654dd745bafc656c52ef6e448ac9ac8c250aa2c121cb4827aa2c61bb40",
+      "backdropReplaced": {
+        "from": [
+          26,
+          27,
+          46
+        ],
+        "to": [
+          255,
+          255,
+          255
+        ],
+        "rule": "pixels within subjectThreshold colour distance of the sampled backdrop",
+        "subjectThreshold": 30.0
+      }
+    },
+    {
+      "role": "palmar",
+      "path": "forge/tests/fixtures/glove_hydra_v1/plates/palmar.png",
+      "sourceImage": "forge/tests/fixtures/glove_hydra_v1/composite.png",
+      "sourceSha256": "191b270558c4671c7644ab0e0832d4d1569999290fe6c597bfb594b253e8dbe0",
+      "cropRect": {
+        "x": 113,
+        "y": 533,
+        "width": 174,
+        "height": 246
+      },
+      "cropSha256": "c1be5696e6bc938c12350d7828ed5ef0138afec6d974d65aa0ed5173377ebcaf",
+      "backdropReplaced": {
+        "from": [
+          26,
+          27,
+          46
+        ],
+        "to": [
+          255,
+          255,
+          255
+        ],
+        "rule": "pixels within subjectThreshold colour distance of the sampled backdrop",
+        "subjectThreshold": 30.0
+      }
+    }
+  ]
+}

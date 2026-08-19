@@ -19,7 +19,7 @@ from forge.stage1_intake.glove_observation import apply_glove_observation
 from forge.stage3_build.glove_artifacts import build_bundle_from_assembly, verify_model_bundle
 from forge.stage3_build.generate_threejs_factory import generate
 from forge.stage3_build.glove_geometry import build_glove_geometry, triangulate_panel_loop, validate_geometry_report
-from forge.stage3_build.glove_generator_dispatch import build_glove_model_from_artifacts
+from forge.stage3_build.glove_generator_dispatch import build_glove_model_from_artifacts, unbuildable_capabilities
 from forge.stage4_review.glove_review import METRIC_KINDS, REPORT_VERSION, build_uncalibrated_scene, evaluate_glove_review, validate_glove_scene
 from forge.stage4_review.glove_seeded_fixtures import seeded_fixture_names, seeded_negative_metrics
 from forge.stage4_review.glove_surface_gates import mutate_surface_contract, validate_glove_surface_contract
@@ -34,13 +34,65 @@ def manifest() -> dict:
 
 
 class GloveAcceptanceTests(unittest.TestCase):
-    def test_target_and_scope_are_narrow(self):
+    def test_any_glove_subtype_is_admitted_and_a_nameless_one_is_not(self):
+        """Subtype is no longer an admission decision.
+
+        This test used to assert the opposite -- that `fingerless` raised and reached
+        `unsupported-subtype` -- because `sport-gloves` was the staged pilot
+        (`cs2_adapters.register_staged_adapter`: "Activate only after the end-to-end glove gates have
+        passed"). The gates passed and the allowlist is gone. What may still refuse is capability, checked
+        where the geometry is built, and a glove that declares no subtype at all.
+        """
         target = json.loads((FIXTURE.parent / "glove_target_v1.json").read_text())
-        self.assertEqual((target["subtype"], target["output"], target["scale"]), ("sport-gloves", "static-pair", "normalized"))
-        with self.assertRaises(ValueError):
-            resolve_family_adapter("glove", "fingerless", staged=True)
-        unsupported = build_manifest(FIXTURE / "dorsal.png", build_classification_record("glove", "fingerless", 0.99, ["fixture:glove"]), references=[(FIXTURE / "dorsal.png", "dorsal")])
-        self.assertEqual(unsupported["state"], "unsupported-subtype")
+        self.assertEqual((target["output"], target["scale"]), ("static-pair", "normalized"))
+        adapter = resolve_family_adapter("glove", "hydra-gloves", staged=True)
+        self.assertEqual((adapter.family, adapter.subtype), ("glove", "hydra-gloves"))
+        admitted = build_manifest(FIXTURE / "dorsal.png", build_classification_record("glove", "hydra-gloves", 0.99, ["fixture:glove"]), references=[(FIXTURE / "dorsal.png", "dorsal")])
+        self.assertNotEqual(admitted["state"], "unsupported-subtype")
+        nameless = build_manifest(FIXTURE / "dorsal.png", build_classification_record("glove", None, 0.99, ["fixture:glove"]), references=[(FIXTURE / "dorsal.png", "dorsal")])
+        self.assertEqual(nameless["state"], "unsupported-subtype")
+
+    def test_the_worked_observation_example_loads_from_disk(self):
+        """The example the docs point at must exist in the repo AND merge.
+
+        Neither was true. `docs/CS2_GLOVE_WORKFLOW.md` cited a path under `.img2threejs/`, which
+        `.gitignore:22` excludes, so a fresh checkout had no example for the only step that can set
+        `evidenceUse`. The copy that did exist raised `surfaceRegionEvidence[0] names unknown source view
+        None`, because it nested `sourceViewId` under `projectionTransform` and carried no `sourceHash`,
+        against the top-level pair `glove_contracts.py:134` requires. No test loaded a file, so the suite
+        stayed green over it. This one loads a file.
+        """
+        example = FIXTURE / "observation.json"
+        self.assertTrue(example.is_file(), "the worked observation example must be committed, not written by a run")
+        merged = apply_glove_observation(manifest(), json.loads(example.read_text(encoding="utf-8")))
+        classified = {view["role"]: view.get("evidenceUse") for view in merged["sourceViews"]}
+        self.assertEqual(classified["dorsal"], "target-geometry-and-surface")
+        self.assertEqual(classified["palmar"], "target-geometry-and-surface")
+        self.assertEqual(merged["extensions"]["glove"]["formProfile"]["kind"], "full-finger")
+
+    def test_capability_refuses_what_the_name_no_longer_does(self):
+        """Removing the subtype allowlist without this turns a refusal into a silently wrong model.
+
+        `glove_contracts.VALID_OPENING_KINDS` has admitted `grouped-chamber` since before any builder
+        existed, and there still is not one: a mitten's digits share a chamber, which is a different solid,
+        not a different tip. It must fail closed and say so, not come out as separate fingers.
+        """
+        def profile(state, digits):
+            return {"extensions": {"glove": {"formProfile": {"kind": "fingerless", "classificationState": state, "digitTopology": digits}}}}
+
+        # The seeded default is not a demand: `build_glove_extension` gives every manifest one placeholder
+        # digit `unclassified-digits` with `opening: "cuff"` under `classificationState: "unknown"`.
+        seeded = build_glove_extension([{"id": "glove-view-1-dorsal", "role": "dorsal"}], "sport-gloves")["formProfile"]
+        self.assertEqual((seeded["kind"], seeded["classificationState"]), ("unknown", "unknown"))
+        self.assertEqual(unbuildable_capabilities({"extensions": {"glove": {"formProfile": seeded}}}), [])
+
+        observed = unbuildable_capabilities(profile("observed", [{"id": "index", "opening": "grouped-chamber"}, {"id": "thumb", "opening": "closed-tip"}]))
+        self.assertEqual(len(observed), 1)
+        self.assertIn("grouped-chamber", observed[0])
+        self.assertIn("index", observed[0])
+        # Both endings the armature can build pass: a capsule's own cap, and that cap subtracted away.
+        for opening in ("closed-tip", "open-cut"):
+            self.assertEqual(unbuildable_capabilities(profile("observed", [{"id": "index", "opening": opening}])), [])
 
     def test_intake_schema_and_source_precedence(self):
         current = manifest()

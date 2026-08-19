@@ -99,13 +99,25 @@ def write_model_bundle(
     factory_content = """// Deterministic generated glove factory contract.\nexport const modelBundleVersion = 'glove-model-bundle.v2';\nexport function createGloveModel(bundle, payloads = []) {\n  if (!bundle || bundle.version !== modelBundleVersion) throw new Error('invalid glove model bundle');\n  if (!Array.isArray(payloads) || payloads.length !== bundle.payloads.length) throw new Error('canonical payloads are required');\n  return { type: 'Group', name: bundle.sceneRoot, meshes: payloads.map((payload) => ({ id: payload.id, vertices: payload.vertices, indices: payload.indices, normals: payload.normals })) };\n}\n"""
     factory_path = factory_dir / "glove_factory.mjs"
     factory_hash = _write_text_atomic(factory_path, factory_content)
+    subtype = str(geometry_report.get("subtype") or "sport-gloves")
+    built_hands = sorted({str(mesh.get("hand")) for mesh in geometry_report["meshes"] if mesh.get("hand")})
     descriptor: dict[str, Any] = {
         "version": MODEL_BUNDLE_VERSION,
         "schemaVersion": 2,
-        "subtype": "sport-gloves",
+        "subtype": subtype,
+        "formProfile": geometry_report.get("formProfile", "full-finger"),
         "evidenceTier": geometry_report.get("evidenceTier", "diagnostic"),
-        "pair": {"canonicalHand": "left", "derivedHand": "right", "rightOverrides": geometry_report.get("handedness", {}).get("rightOverrides", [])},
-        "sceneRoot": "sport-gloves-pair",
+        # A single-hand item has no derived hand. Declaring one anyway told the review to expect two
+        # separate subjects in the render and to score a mirror that was never built.
+        "pair": {
+            "canonicalHand": "left",
+            "derivedHand": "right" if "right" in built_hands else None,
+            "hands": built_hands,
+            "rightOverrides": geometry_report.get("handedness", {}).get("rightOverrides", []) if "right" in built_hands else [],
+        },
+        # Named for what is in it. A single-hand bundle calling itself a pair is a small lie that a
+        # reader of the scene graph would have to check the payloads to catch.
+        "sceneRoot": f"{subtype}-pair" if len(built_hands) > 1 else f"{subtype}-{built_hands[0] if built_hands else 'hand'}",
         "sceneVersion": scene_version,
         "factoryModule": {"path": factory_path.relative_to(output_dir).as_posix(), "sha256": factory_hash},
         "payloads": payloads,

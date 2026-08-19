@@ -29,9 +29,14 @@ def measure_hand_separation(geometry_report: dict[str, Any]) -> dict[str, Any]:
             by_panel.setdefault(str(mesh.get("panelId")), {})[str(mesh["hand"])] = mesh
     separations: dict[str, float] = {}
     coincident: list[str] = []
+    # A single-hand item has one mesh per panel by construction, and there is nothing to separate it
+    # from. Counting that as coincident reported a defect for a glove that was built exactly as declared.
+    single_hand = len({str(mesh.get("hand")) for mesh in geometry_report.get("meshes", [])
+                       if isinstance(mesh, dict) and mesh.get("hand") in {"left", "right"}}) == 1
     for panel, hands in sorted(by_panel.items()):
         if set(hands) != {"left", "right"}:
-            coincident.append(panel)
+            if not single_hand:
+                coincident.append(panel)
             continue
         left, right = _bounds(hands["left"]), _bounds(hands["right"])
         gap = max(max(low[0] - high[1], high[0] - low[1]) for low, high in zip(left, right))
@@ -43,6 +48,7 @@ def measure_hand_separation(geometry_report: dict[str, Any]) -> dict[str, Any]:
         "minimumSeparation": round(min(separations.values()), 6) if separations else None,
         "panelSeparations": separations,
         "coincidentPanels": coincident,
+        "singleHand": single_hand,
         "separated": bool(by_panel) and not coincident,
     }
 
@@ -54,8 +60,15 @@ def validate_glove_surface_contract(geometry_report: dict[str, Any], spec: dict[
         errors.append("handedness:canonical-left-reflection-missing")
     if handedness.get("windingCorrected") is not True or handedness.get("normalsCorrected") is not True:
         errors.append("handedness:orientation-correction-missing")
+    # Right-hand overrides describe how the derived hand differs from the canonical one. A single-hand
+    # item derives no hand, so demanding them asks for a description of a glove that was not built.
+    built_hands = {str(mesh.get("hand")) for mesh in geometry_report.get("meshes", [])
+                   if isinstance(mesh, dict) and mesh.get("hand") in {"left", "right"}}
     overrides = handedness.get("rightOverrides")
-    if not isinstance(overrides, list) or not {item.get("id") for item in overrides if isinstance(item, dict)} >= {"right-closure-orientation", "right-thumb-side"}:
+    if "right" in built_hands and (
+        not isinstance(overrides, list)
+        or not {item.get("id") for item in overrides if isinstance(item, dict)} >= {"right-closure-orientation", "right-thumb-side"}
+    ):
         errors.append("asymmetry:right-hand-overrides-missing")
     try:
         separation = measure_hand_separation(geometry_report)
