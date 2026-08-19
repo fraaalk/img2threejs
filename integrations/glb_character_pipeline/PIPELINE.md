@@ -28,6 +28,20 @@ not an asset to ship, and you want a character that:
   apart in a side-by-side, while remaining honest that it is a reconstruction, not a copy
 - animates (at minimum a walk cycle) without a rig baked into the source file
 
+## Applicability gate — GLB is optional, check for it before anything else
+
+**A GLB reference is optional for a character build, and this whole integration only applies when one
+exists.** Before running anything below, check the current build request for a GLB reference (a
+`CHARACTER_GLB` path, an attached/linked `.glb`, or an explicit mention of one):
+
+- **A GLB reference exists** → proceed through Stage 0 onward, as described below.
+- **No GLB reference** → **skip every stage in this document (Stage 0 through Stage 9) entirely.** Do
+  not treat the absence as an error, a blocker, or something to substitute a placeholder for. Build the
+  character through the core img2threejs image-driven procedural pipeline instead (`forge/`) — that path
+  never depends on a GLB. This integration has no code path that runs without one; every stage below
+  (the cross-section loft included) measures a real GLB point cloud, so there is nothing here to
+  partially apply to an image-only build.
+
 ## Stage 0 — Intake
 
 1. Symlink the baseline GLB(s) into `public/mesh/` and `public/baseline/` (both gitignored — they are

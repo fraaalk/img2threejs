@@ -24,7 +24,8 @@ reconstruction by code. If you want a projection or generative-assist path, prop
 explicit, flagged, opt-in mode. `integrations/glb_character_pipeline/` is one such mode: a GLB-baseline
 character reconstruction pipeline (SDF point-cloud splat + Surface Nets) that runs against a companion
 showcase checkout via `IMG2THREEJS_SHOWCASE_ROOT`, isolated behind its own `pyproject.toml`/`uv.lock`
-and `node/package.json` so the `forge` core stays dependency-free. See its `README.md`.
+and `node/package.json` so the `forge` core stays dependency-free. It only applies when a character
+build actually has a GLB reference to measure — skip it entirely otherwise. See its `README.md`.
 
 ## Development
 

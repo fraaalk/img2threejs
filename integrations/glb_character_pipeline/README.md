@@ -1,5 +1,11 @@
 # GLB character pipeline (opt-in)
 
+**GLB reference is optional. If the character build has none, skip this integration entirely** — do
+not error, do not partially apply it, do not substitute anything. Build through the core img2threejs
+image-driven pipeline (`forge/`) instead; nothing here has a code path that runs without a real GLB
+point cloud to measure. Only reach for anything below once you've confirmed a GLB reference actually
+exists for this character (see `PIPELINE.md`'s "Applicability gate").
+
 This integration reconstructs a **multipart GLB baseline** as code-only TypeScript/three.js — a fully
 procedural character with no `.glb`/`.bin` fetched at runtime — using an SDF point-cloud splat and
 Surface Nets contouring for organic detail a cross-section loft alone can't reach (eyelids, folds,
