@@ -313,6 +313,82 @@ is listed with its reason, so a short mesh list cannot be mistaken for a clean o
 
 ## Reference comparison and baselines
 
+### stage4_review/interior_difference.py
+`stage4_review/interior_difference.py BASELINE.png RENDER.png [--from 0] [--to 0.19] [--json]`
+Appearance difference **inside** the silhouette, banded by height. Required evidence on every visual
+pass, because silhouette IoU is computed from roughly 11% of figure cells — the ones on the outline —
+and is blind to the other 89%. The measured proof: a model with its face deleted scored 0.8803
+against the finished face's 0.8803, identical to four decimals, and adding an entire mouth moved
+that metric −0.0002. Both renders are aligned by foreground bounding box, the same normalisation the
+IoU scorer uses, and only cells that are figure in **both** are compared so outline agreement cannot
+leak back in. Refuses to score when either foreground mask fell back to whole-frame coverage — the
+same hard gate `divine_eye` makes, for the same reason. Reports `cellsCompared`, so a difference
+measured over a handful of cells cannot pass as evidence. On a standing figure the head is roughly
+`--from 0 --to 0.19`.
+
+## Hair
+
+Full contract, every measurement behind it, and every stated non-goal: `docs/HAIR_PIPELINE.md`.
+Run these only when the subject has hair — `orchestrate_passes.py` demands them via
+`spec_has_hair()`, which reads a `hairProfile` block or any component whose role is `hair`, so a
+chair and a knife are never asked for hair evidence.
+
+### stage1_intake/extract_hair_evidence.py
+`stage1_intake/extract_hair_evidence.py front=ref.front.png rear=ref.rear.png [--out evidence.json]`
+Measures what the reference actually says about its hair: the hair/skin split, banded dark coverage
+across crown/mid/jaw, the hairline (writing the `faceLandmarks.hairline` slot that existed unfilled
+since v1.2), the specular band position, and the root-to-tip luminance delta. Views not supplied are
+reported as `notObserved`, so nothing downstream authors a nape as if it had been seen. The split is
+Otsu's between-class variance, not a percentile: a fixed percentile makes the reported hair fraction
+true by construction and read 0.380 / 0.384 / 0.382 across three different views of one subject,
+which looks like agreement and is arithmetic. The same three views now read 0.387 / 0.592 / 0.747.
+
+### stage4_review/scalp_exposure.py — HARD
+`stage4_review/scalp_exposure.py --rings skull.json --hair-points hair.json [--v-low 0] [--v-high 1] [--hard-max 0.05] [--out report.json]`
+Finds bald patches geometrically, on points, before anything is rendered — so it needs no browser, no
+GPU and no capture, and works on any hair representation. It counts only hair **outside** the skull:
+a nearest-neighbour test passes the failing build, because those vertices were still nearby, merely
+sunk below the surface. Exposure above `--hard-max` is a hard failure, never a soft signal.
+`--hard-max` is deliberately loose and uncalibrated, and the report says so.
+
+### stage4_review/hair_gate.py — soft
+`stage4_review/hair_gate.py --reference front=ref.png --render front=out.png [--scalp-exposure report.json] [--out gate.json]`
+Compares banded coverage, hairline offset and highlight-band position against the reference, and
+classifies each difference by kind. Pass `--scalp-exposure` and its verdict dominates: a bald patch
+is always wrong, while a coverage shortfall is often the best available compromise at a given
+triangle budget. Conflating the two produced four wrong fixes in one session — a shortfall was read
+as "add more hair", the masses were widened, and the widening pushed them off the skull, taking
+closure from 42.2% to 40.9%, worse on all six views, with crown exposure up 14.9 points on the worst.
+**A coverage shortfall never authorises widening the masses on its own.**
+
+### Hair libraries (no CLI)
+- `_shared/scalp_field.py` — signed distance to a skull built as a stack of ellipse rings, derived
+  from the head component so it is never authored twice. Sign is exact; magnitude is the first-order
+  estimate `f / |grad f|`, so treat the sign as authoritative and the magnitude as approximate.
+- `stage2_spec/hair_profile.py` — the hairstyle schema and its validation rules. Roots are `(u, v)`
+  on the scalp; an absolute root is a hard error. `plane-card`, `tube` and `box` are rejected for
+  hair. Default representation tier is `shell`. **This module validates a profile; it does not
+  compile one into components** — no profile-to-`componentTree` compiler exists yet.
+
+## Left and right
+
+### _shared/chirality.py (no CLI)
+Two chirality defects can ship in one figure and need **different** tests, which is why both exist:
+- `check_pair()` — enforced at spec time by `validate_sculpt_spec.py`. A pair built by negating x
+  *and* z is a 180° rotation, and rotation preserves handedness, so both limbs come out the same
+  hand. It names the relation (`rotation` / `translation` / `unrelated`) rather than saying
+  "mismatch", because the two are trivially confused and agree exactly on a symmetric part.
+- `medial_lateral_bias()` + `compare_bias()` — needs a reference. Catches what a pair test
+  structurally cannot: a pair wrong the *same* way on both sides is still a perfect mirror of
+  itself. Only the **sign** of the bias is judged; a magnitude difference is a proportion issue that
+  other gates own. Below `MIN_REFERENCE_BIAS` (0.025) the reference is treated as too symmetric to
+  judge handedness from.
+
+`CHARACTER_LEFT_SIGN` is the convention as code: with `forward: +Z`, Y up and a right-handed frame,
+the character's own left is `+X`. Reflecting also inverts triangle winding — flip it back on the
+mirrored side, or `flatShading` derives every normal from the reversed winding and the limb lights as
+though lit from behind.
+
 ### stage4_review/mesh_reference_compare.py
 `stage4_review/mesh_reference_compare.py REFERENCE.glb CANDIDATE.glb [--bands N] [--json]`
 Says **where** a candidate is wrong, band by band, instead of returning one aggregate score. Both

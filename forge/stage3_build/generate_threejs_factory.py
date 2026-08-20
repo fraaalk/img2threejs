@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -35,26 +36,14 @@ from subdivision import (
     TORUS_RADIAL_SEGMENTS,
     TORUS_TUBULAR_SEGMENTS,
 )
-from validate_sculpt_spec import validate_spec
+from validate_sculpt_spec import VALID_PRIMITIVES, validate_spec
 from visual_hull import MAX_VISUAL_HULL_TRIANGLES
 
-
-VALID_PRIMITIVES = {
-    "box",
-    "sphere",
-    "ellipsoid",
-    "cylinder",
-    "cone",
-    "capsule",
-    "torus",
-    "tube",
-    "lathe",
-    "extrude",
-    "ground-blade",
-    "curve-sweep",
-    "plane-card",
-    "instanced-cluster",
-}
+# VALID_PRIMITIVES is re-exported rather than redefined. This module used to keep its own copy,
+# and the two stayed identical only because someone edited both every time. A primitive present
+# in one list and absent from the other does not error: line ~2873 silently rewrites it to "box",
+# so the spec validates, the factory builds, and the wrong shape ships. Importing the validator's
+# set makes that class of drift impossible instead of merely unlikely.
 DEFAULT_PASS_ORDER = [
     "blockout",
     "structural-pass",
@@ -279,6 +268,34 @@ def vector(values: Any, fallback: list[float]) -> str:
     return ", ".join(str(item) for item in fallback)
 
 
+def scale_triple(component: dict[str, Any], transform: dict[str, Any]) -> tuple[float, float, float]:
+    """The numeric factors `scale_vector` renders, for callers that must do arithmetic with them.
+
+    This exists because `geometry.scale(...)` bakes the factors into the VERTEX DATA and leaves the
+    pivot at scale 1. Anything that describes a component's surface analytically -- a ring stack to
+    stand proud of, say -- therefore has to apply the same factors itself, because no matrix in the
+    scene graph carries them. Reading the surface from the unit form instead put the skull's radius
+    at 0.5 where the geometry actually sits at 0.2.
+    """
+    if "scale" in transform:
+        values = transform.get("scale")
+        if isinstance(values, list) and len(values) == 3 and all(
+            isinstance(item, (int, float)) for item in values
+        ):
+            return (float(values[0]), float(values[1]), float(values[2]))
+        return (1.0, 1.0, 1.0)
+    dimensions = component.get("dimensions")
+    if isinstance(dimensions, dict):
+        radius = dimensions.get("radius")
+        fallback = radius * 2 if isinstance(radius, (int, float)) else 1
+        width = dimensions.get("width", fallback)
+        height = dimensions.get("height", dimensions.get("length", 1))
+        depth = dimensions.get("depth", fallback)
+        if all(isinstance(item, (int, float)) for item in (width, height, depth)):
+            return (float(width), float(height), float(depth))
+    return (1.0, 1.0, 1.0)
+
+
 def scale_vector(component: dict[str, Any], transform: dict[str, Any]) -> str:
     if "scale" in transform:
         return vector(transform.get("scale"), [1, 1, 1])
@@ -321,6 +338,24 @@ _DEFAULT_CURVE_SWEEP = {
     "spine": [[-0.5, -0.4, 0.0], [-0.1, 0.1, 0.0], [0.3, 0.2, 0.0], [0.6, -0.1, 0.0]],
     "crossSection": {"points": [[-0.04, -0.02], [0.04, -0.02], [0.04, 0.02], [-0.04, 0.02]]},
     "closed": False,
+}
+
+# A sweep whose cross-section CHANGES along the spine. Every other sweep this factory emits --
+# tube, curve-sweep, extrude -- carries one constant section from root to tip, so nothing that
+# comes to a point (a hair lock, a horn, a tail, a blade tip, a finger) can be expressed by them.
+# The default tapers to 8% of its root, which is the profile the grimoire prescribes; the
+# validator warns when a spec's stations do not actually taper, because a barely-tapering sweep
+# is a `tube` written the long way and reads as a noodle.
+_DEFAULT_TAPERED_SWEEP = {
+    "stations": [
+        {"position": [0.0, -0.5, 0.0], "rx": 0.060, "rz": 0.040, "twist": 0.0},
+        {"position": [0.0, -0.1, 0.0], "rx": 0.048, "rz": 0.030, "twist": 0.0},
+        {"position": [0.0, 0.25, 0.0], "rx": 0.024, "rz": 0.014, "twist": 0.0},
+        # A true point, not a small ring: the tip is where a lock, a horn or a blade has to close.
+        {"position": [0.0, 0.5, 0.0], "rx": 0.0, "rz": 0.0, "twist": 0.0},
+    ],
+    "radialSegments": 10,
+    "capEnds": True,
 }
 
 
@@ -1284,6 +1319,246 @@ def capped_sdf(sdf: dict[str, Any], segments: dict[str, int]) -> dict[str, Any]:
     return {**sdf, "resolution": ceiling}
 
 
+_STAND_PROUD_HELPER_SOURCE = '''\
+type ProudRingStack = { rings: [number, number, number, number][] };
+
+// Signed distance to a stack of ellipse rings. Negative inside, positive outside.
+//
+// The sign is exact; the magnitude is the first-order estimate f / |grad f|, which UNDERSTATES how
+// clear an outside point is and OVERSTATES how deep an inside point is. Both errors make the march
+// below push slightly further than strictly necessary, which is the safe direction: the failure
+// being prevented is a component sinking into the one beneath it and rendering as a bare patch.
+function ringStackDistance(stack: ProudRingStack, x: number, y: number, z: number): number {
+  const rings = stack.rings;
+  const yMin = rings[0][0];
+  const yMax = rings[rings.length - 1][0];
+  let rx = rings[0][1];
+  let rz = rings[0][2];
+  let zc = rings[0][3];
+  if (y >= yMax) {
+    const last = rings[rings.length - 1];
+    rx = last[1]; rz = last[2]; zc = last[3];
+  } else if (y > yMin) {
+    for (let i = 0; i + 1 < rings.length; i += 1) {
+      const lo = rings[i];
+      const hi = rings[i + 1];
+      if (y >= lo[0] && y <= hi[0]) {
+        const span = hi[0] - lo[0];
+        const t = span > 1e-9 ? (y - lo[0]) / span : 0;
+        rx = lo[1] + (hi[1] - lo[1]) * t;
+        rz = lo[2] + (hi[2] - lo[2]) * t;
+        zc = lo[3] + (hi[3] - lo[3]) * t;
+        break;
+      }
+    }
+  }
+  const dx = x / rx;
+  const dz = (z - zc) / rz;
+  const f = dx * dx + dz * dz - 1;
+  const gx = (2 * x) / (rx * rx);
+  const gz = (2 * (z - zc)) / (rz * rz);
+  const grad = Math.hypot(gx, gz);
+  const radial = grad < 1e-12 ? -Math.min(rx, rz) : f / grad;
+  const axial = Math.max(yMin - y, y - yMax);
+  return Math.hypot(Math.max(radial, 0), Math.max(axial, 0)) + Math.min(Math.max(radial, axial), 0);
+}
+
+// Push every vertex outward until it stands `clearance` clear of the target's surface.
+//
+// WHY THE AUTHORED NUMBERS ARE ONLY A LOWER BOUND. A ring is an ELLIPSE, and the surface it has to
+// clear generally is not. Any single ellipse that clears the widest point is loose at the narrowest
+// and vice versa, so hand-widening moves the error rather than shrinking it -- measured on hair,
+// where widening the side masses took closure from 42.2% to 40.9%, worse on all six views, with
+// dark coverage DOWN because the widened mass had slid off the skull. Here the authored width is a
+// floor and the real radius is MEASURED per vertex.
+//
+// Each vertex travels along its OWN radial spoke rather than along the field's gradient, so the
+// ring keeps its vertex order and its seam positions and only its radius changes. `maxPush` is
+// required, not a safeguard: an uncapped march walks inner vertices straight through the target and
+// out the far side, closing the very gap the component exists to leave.
+function applyStandProud(
+  geometry: THREE.BufferGeometry,
+  marcher: THREE.Object3D,
+  target: THREE.Object3D,
+  stack: ProudRingStack,
+  clearance: number,
+  maxPush: number,
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  marcher.updateWorldMatrix(true, false);
+  target.updateWorldMatrix(true, false);
+  const toTarget = new THREE.Matrix4().copy(target.matrixWorld).invert().multiply(marcher.matrixWorld);
+  const fromTarget = new THREE.Matrix4().copy(toTarget).invert();
+  const p = new THREE.Vector3();
+  // A vertex can exhaust `maxPush` and still be inside the target. That is the cap doing its job --
+  // an uncapped march walks vertices out the far side -- but it means the clearance this function
+  // promises was NOT achieved, and saying nothing there hides exactly the defect the caller asked
+  // to be protected from. Measured on the shipped fixture: 2 of 8 sampled hair vertices sat 0.059
+  // inside a skull against a 0.04 cap and could never have reached clear.
+  let unresolved = 0;
+
+  for (let i = 0; i < position.count; i += 1) {
+    p.fromBufferAttribute(position, i).applyMatrix4(toTarget);
+    // The spoke is the vertex's own radial direction in the target's frame; marching along it keeps
+    // each ring a ring, since every vertex holds its own angle and only its radius changes.
+    //
+    // A vertex on the axis has no radial direction at all -- and that is precisely the crown, the
+    // one place a bald patch is most visible. Skipping it leaves the exact failure this function
+    // exists to prevent. So a degenerate spoke marches axially instead, out through whichever cap
+    // it is nearer, which is the direction the field itself measures there.
+    const spokeLength = Math.hypot(p.x, p.z);
+    const onAxis = spokeLength < 1e-9;
+    const midHeight = (stack.rings[0][0] + stack.rings[stack.rings.length - 1][0]) / 2;
+    const sx = onAxis ? 0 : p.x / spokeLength;
+    const sz = onAxis ? 0 : p.z / spokeLength;
+    const sy = onAxis ? (p.y >= midHeight ? 1 : -1) : 0;
+
+    let travelled = 0;
+    for (let step = 0; step < 24; step += 1) {
+      const gap = ringStackDistance(stack, p.x, p.y, p.z);
+      if (gap >= clearance) break;
+      const move = Math.min(Math.max(0.002, clearance - gap), maxPush - travelled);
+      if (move <= 0) break;
+      p.x += sx * move;
+      p.y += sy * move;
+      p.z += sz * move;
+      travelled += move;
+    }
+
+    if (ringStackDistance(stack, p.x, p.y, p.z) < clearance) unresolved += 1;
+
+    p.applyMatrix4(fromTarget);
+    position.setXYZ(i, p.x, p.y, p.z);
+  }
+
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  geometry.userData.standProud = { clearance, maxPush, unresolved, total: position.count };
+  if (unresolved > 0) {
+    console.warn(
+      `standProud: ${unresolved}/${position.count} vertices could not reach ${clearance} within ` +
+      `maxPush ${maxPush}. They are still inside the target and will render as bare patches. ` +
+      `Raise maxPush, or move the component out so it does not start that deep.`,
+    );
+  }
+}
+'''
+
+
+_ROOT_TIP_GRADIENT_HELPER_SOURCE = '''\
+// Darken a mass toward its root.
+//
+// WHY THIS IS SHADING AND NOT GEOMETRY. Measured on the reference this pipeline is calibrated
+// against -- a 570,400 vertex merged scan -- the surface roughness over the hair is 0.00338 against
+// a torso control of 0.00312. Its hair is a SMOOTH SHELL and every strand it appears to have lives
+// in the diffuse and normal textures. This pipeline emits code and no textures, so the same
+// impression has to be carried by vertex colour, faceting and sheen. Adding lock geometry does not
+// substitute for it: four attempts to close the gap geometrically all failed, and the last one made
+// every view worse.
+//
+// The gradient runs along the mass's own local axis rather than world Y, so a fringe sweeping
+// sideways darkens at its root and not at whatever happens to be lowest.
+function applyRootTipGradient(
+  geometry: THREE.BufferGeometry,
+  rootColor: THREE.ColorRepresentation,
+  tipColor: THREE.ColorRepresentation,
+  axis: 'x' | 'y' | 'z',
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const root = new THREE.Color(rootColor);
+  const tip = new THREE.Color(tipColor);
+  const values = new Float32Array(position.count * 3);
+
+  let low = Infinity;
+  let high = -Infinity;
+  for (let i = 0; i < position.count; i += 1) {
+    const v = axis === 'x' ? position.getX(i) : axis === 'z' ? position.getZ(i) : position.getY(i);
+    if (v < low) low = v;
+    if (v > high) high = v;
+  }
+  // A mass with no extent along its own axis has no root and no tip; a flat colour is the honest
+  // answer, and dividing by the span would produce NaN on every vertex.
+  const span = high - low;
+
+  const mixed = new THREE.Color();
+  for (let i = 0; i < position.count; i += 1) {
+    const v = axis === 'x' ? position.getX(i) : axis === 'z' ? position.getZ(i) : position.getY(i);
+    const t = span > 1e-9 ? (v - low) / span : 1;
+    mixed.copy(root).lerp(tip, t);
+    values[i * 3] = mixed.r;
+    values[i * 3 + 1] = mixed.g;
+    values[i * 3 + 2] = mixed.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+}
+'''
+
+
+def root_tip_gradient(component: dict[str, Any]) -> dict[str, Any] | None:
+    """A component's root-to-tip colour ramp, or None.
+
+    Rejected rather than defaulted when malformed: a gradient silently falling back to flat colour
+    is the kind of quiet no-op that made hair hard to diagnose in the first place.
+    """
+    gradient = component.get("rootTipGradient")
+    if not isinstance(gradient, dict):
+        return None
+    root = gradient.get("rootColor")
+    tip = gradient.get("tipColor")
+    if not isinstance(root, str) or not isinstance(tip, str):
+        return None
+    axis = gradient.get("axis", "y")
+    if axis not in ("x", "y", "z"):
+        axis = "y"
+    return {"rootColor": root, "tipColor": tip, "axis": axis}
+
+
+def stand_proud_ring_stack(component: dict[str, Any]) -> list[list[float]] | None:
+    """The ring stack a component presents as a surface to stand proud of, in its own local space.
+
+    Two sources, because two shapes actually occur. A component authored as a ring stack carries one
+    directly. Everything else that is a closed convex blob -- an ellipsoid or a sphere, which is what
+    a generated head is -- gets one synthesised from its unit geometry, since `geometry_for` authors
+    those at radius 0.5 and the real dimensions arrive later via `geometry.scale`. Returning None
+    means the target has no surface this march can describe, and the caller must say so rather than
+    silently skip the clearance.
+    """
+    descriptor = component.get("geometryDescriptor")
+    if isinstance(descriptor, dict):
+        stack = descriptor.get("ringStack")
+        if isinstance(stack, dict) and isinstance(stack.get("rings"), list) and stack["rings"]:
+            offsets = stack.get("zOffsets")
+            rings: list[list[float]] = []
+            for index, ring in enumerate(stack["rings"]):
+                values = [float(v) for v in list(ring)[:4]]
+                if len(values) < 3:
+                    return None
+                if len(values) == 3:
+                    offset = 0.0
+                    if isinstance(offsets, list) and index < len(offsets):
+                        offset = float(offsets[index])
+                    values.append(offset)
+                rings.append(values)
+            rings.sort(key=lambda r: r[0])
+            return rings
+
+    if component.get("primitive") in {"ellipsoid", "sphere", "capsule"}:
+        # A unit sphere of radius 0.5, sliced into rings. The march runs in the TARGET's local
+        # space, and `geometry.scale` has already been applied to the target's own vertices, so the
+        # stack has to describe the unit form and let the caller's matrix carry the scale.
+        slices = 12
+        rings = []
+        for index in range(slices + 1):
+            t = index / slices
+            y = -0.5 + t
+            radius = math.sqrt(max(0.0, 0.25 - y * y))
+            rings.append([round(y, 6), round(max(radius, 1e-4), 6), round(max(radius, 1e-4), 6), 0.0])
+        return rings
+
+    return None
+
+
 def geometry_for(
     primitive: str,
     component: dict[str, Any] | None = None,
@@ -1336,6 +1611,13 @@ def geometry_for(
     if primitive == "curve-sweep":
         sweep = descriptor.get("curveSweep") if isinstance(descriptor.get("curveSweep"), dict) else _DEFAULT_CURVE_SWEEP
         return f"buildCurveSweepGeometry({json_literal(sweep)})"
+    if primitive == "tapered-sweep":
+        tapered = (
+            descriptor.get("taperedSweep")
+            if isinstance(descriptor.get("taperedSweep"), dict)
+            else _DEFAULT_TAPERED_SWEEP
+        )
+        return f"buildTaperedSweepGeometry({json_literal(tapered)})"
     if primitive == "instanced-cluster":
         # An instanced cluster's *geometry* is its base shape; the instancing itself is applied
         # by the repetition-system emitter (THREE.InstancedMesh). Resolve the base primitive from
@@ -1415,12 +1697,15 @@ def rig_is_bone_track(spec: dict[str, Any]) -> bool:
 
 
 def emit_rig_hierarchy(spec: dict[str, Any]) -> list[str]:
-    """Emit the bone hierarchy from `spec["rig"]` — PLAN_1.5 WS-C, first slice.
+    """Emit the bone hierarchy from `spec["rig"]` — PLAN_1.5 WS-C.
 
-    Bones ONLY: no `SkinnedMesh`, no `bind()`. Keeping those in a later slice is deliberate,
-    because it means this change cannot alter any existing demo's rendered output — on the
-    pivot track it emits nothing, and on the bone track it only ADDS a hierarchy that nothing
-    is yet bound to. `root.userData.rig.bound` is `false` to say so out loud.
+    Emits the bones, one shared `THREE.Skeleton`, exactly one vertex-weight helper, and binds every
+    skinned component as a `THREE.SkinnedMesh`. `root.userData.rig.bound` is COMPUTED — it is true
+    only when every skinned mesh actually bound — rather than asserted, so a partial bind reports
+    itself instead of reading as success.
+
+    On the pivot track this emits nothing at all, so an object spec's output is byte-identical to
+    what it was before the rig track existed.
 
     Two things that are easy to get wrong here:
 
@@ -1577,12 +1862,10 @@ def _rig_weight_function_lines(spec: dict[str, Any], ordered: list[dict[str, Any
     - **The envelope radius is computed in Python**, by `derive_envelope_radius` (PLAN_1.5 §4.3),
       and emitted as a literal. Doing it here reuses the one implementation instead of
       transcribing the formula into TypeScript, where it could drift.
-    - **The attributes are written but nothing is bound yet.** `skinIndex`/`skinWeight` on a
-      plain `THREE.Mesh` are inert — nothing renders differently — so this slice cannot change
-      any existing output. It also means the emitted function IS called, which matters because
-      both the showcase tsconfig and the test harness compile with `--noUnusedLocals`: an
-      emitted-but-uncalled helper is a hard tsc error, so WS-C.2 genuinely cannot land on its
-      own without this half.
+    - **The helper is emitted once and IS called.** Both the showcase tsconfig and the test
+      harness compile with `--noUnusedLocals`, so an emitted-but-uncalled helper is a hard tsc
+      error. WS-C.3 consumes these attributes: each skinned component becomes a
+      `THREE.SkinnedMesh` and binds against the one shared `Skeleton`.
     """
     # stage5_rig was deliberately standalone "until WS-C integration" per its own docstring.
     # This is that integration, so importing its derivation is the intended coupling rather than
@@ -1857,6 +2140,83 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         if isinstance(component.get("geometryDescriptor"), dict)
         and isinstance(component["geometryDescriptor"].get("visualHull"), dict)
     ]
+    # A component may require that it stay outside another's surface. Resolved here rather than at
+    # each emission site so an unresolvable declaration becomes one visible comment in the output
+    # instead of a clearance that silently never ran.
+    components_by_id = {
+        str(component.get("id")): component
+        for component in components
+        if isinstance(component, dict) and component.get("id")
+    }
+    stand_proud_jobs: list[dict[str, Any]] = []
+    stand_proud_skipped: list[str] = []
+    for component in components:
+        proud = component.get("standProud") if isinstance(component, dict) else None
+        if not isinstance(proud, dict):
+            continue
+        component_id = str(component.get("id"))
+        target_id = str(proud.get("againstComponentId") or "")
+        proud_target = components_by_id.get(target_id)
+        if proud_target is None:
+            stand_proud_skipped.append(
+                f"{component_id}: standProud target {target_id!r} is not in this component tree"
+            )
+            continue
+        # In the target's LOCAL frame -- which is what `toTarget` maps into -- the surface sits
+        # where `geometry.scale` put it, and that scale is baked into the vertices rather than into
+        # any matrix. So the analytic stack has to be scaled by hand to match. Measured on the
+        # fixture: the authored rings span rx 0.12..0.20 while the scaled geometry spans
+        # 0.048..0.080, and an ellipsoid target's unit stack claims 0.5 against an actual 0.2. Left
+        # unscaled, the march pushed hair to two and a half times the skull's real radius.
+        target_transform = proud_target.get("transform")
+        sx, sy, sz = scale_triple(
+            proud_target, target_transform if isinstance(target_transform, dict) else {}
+        )
+        rings = stand_proud_ring_stack(proud_target)
+        # A ring stack is a SEPARATE description of a shape the generator also builds another way,
+        # so the two can disagree and nothing else would notice. The case that occurs: a `lathe` is
+        # a revolve and is therefore circular before `geometry.scale`, so its rings must have
+        # rx == rz and let the dimensions supply the ellipticity. A fixture here authored rx != rz
+        # on a lathe and described a surface 10-33% wider in z than the geometry it stood for.
+        if rings and proud_target.get("primitive") == "lathe":
+            for ring in rings:
+                if abs(ring[1] - ring[2]) > 1e-9:
+                    stand_proud_skipped.append(
+                        f"{component_id}: standProud target {target_id!r} is a lathe, which is "
+                        f"circular before scaling, but its ringStack authors rx {ring[1]} != rz "
+                        f"{ring[2]}. The stack does not describe the target's geometry."
+                    )
+                    rings = None
+                    break
+        if rings:
+            rings = [
+                [ring[0] * sy, ring[1] * sx, ring[2] * sz, ring[3] * sz] for ring in rings
+            ]
+        if not rings:
+            stand_proud_skipped.append(
+                f"{component_id}: standProud target {target_id!r} "
+                f"(primitive {proud_target.get('primitive')!r}) exposes no ring stack to stand proud of"
+            )
+            continue
+        clearance = proud.get("clearance")
+        max_push = proud.get("maxPush")
+        if not isinstance(clearance, (int, float)) or not isinstance(max_push, (int, float)):
+            stand_proud_skipped.append(f"{component_id}: standProud needs numeric clearance and maxPush")
+            continue
+        stand_proud_jobs.append({
+            "componentId": component_id,
+            "targetId": target_id,
+            "rings": rings,
+            "clearance": float(clearance),
+            "maxPush": float(max_push),
+        })
+    if stand_proud_jobs:
+        lines.extend(_STAND_PROUD_HELPER_SOURCE.splitlines())
+        lines.append("")
+    if any(root_tip_gradient(component) for component in components):
+        lines.extend(_ROOT_TIP_GRADIENT_HELPER_SOURCE.splitlines())
+        lines.append("")
+
     has_subdivision = any(subdivision_iterations(component) > 0 for component in components)
     has_decimation = any(decimate_ratio(component) is not None for component in components)
     if visual_hull_components:
@@ -2136,6 +2496,121 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 "  const curve = new THREE.CatmullRomCurve3(vectors, path.closed ?? false);",
                 "  const tubularSegments = Math.max(8, path.points.length * 6);",
                 "  return new THREE.TubeGeometry(curve, tubularSegments, path.radius ?? 0.05, path.radialSegments ?? 8, path.closed ?? false);",
+                "}",
+                "",
+            ]
+        )
+    if "tapered-sweep" in used_primitives:
+        lines.extend(
+            [
+                "type TaperedStation = { position: [number, number, number]; rx: number; rz: number; twist?: number };",
+                "",
+                "// Frames come from PARALLEL TRANSPORT, not from a Frenet frame. A Frenet frame is defined by",
+                "// the curve's normal, which flips sign wherever the path has an inflection or straightens out,",
+                "// and every flip twists the surface 180 degrees within one segment. Carrying the previous frame",
+                "// forward and removing only its along-path component keeps the twist continuous. THREE's own",
+                "// extrudePath and TubeGeometry do not expose this, which is why this is hand-built.",
+                "function buildTaperedSweepGeometry(",
+                "  sweep: { stations: TaperedStation[]; radialSegments?: number; capEnds?: boolean },",
+                "): THREE.BufferGeometry {",
+                "  const stations = sweep.stations;",
+                "  if (stations.length < 2) throw new Error('tapered-sweep needs at least two stations');",
+                "  const radial = Math.max(3, sweep.radialSegments ?? 10);",
+                "  const centres = stations.map((s) => new THREE.Vector3(...s.position));",
+                "",
+                "  const tangents = centres.map((_, i) => {",
+                "    const prev = centres[Math.max(0, i - 1)];",
+                "    const next = centres[Math.min(centres.length - 1, i + 1)];",
+                "    const t = next.clone().sub(prev);",
+                "    // Coincident neighbours would normalise to NaN and poison every downstream vertex.",
+                "    return t.lengthSq() < 1e-12 ? new THREE.Vector3(0, 1, 0) : t.normalize();",
+                "  });",
+                "",
+                "  // Seed a reference axis that is not parallel to the first tangent, or the first cross",
+                "  // product is degenerate and the whole sweep collapses to a line.",
+                "  let ref = new THREE.Vector3(0, 0, 1);",
+                "  if (Math.abs(tangents[0].dot(ref)) > 0.9) ref = new THREE.Vector3(1, 0, 0);",
+                "",
+                "  const normals: THREE.Vector3[] = [];",
+                "  const binormals: THREE.Vector3[] = [];",
+                "  let carried = ref.clone().sub(tangents[0].clone().multiplyScalar(ref.dot(tangents[0]))).normalize();",
+                "  for (let i = 0; i < tangents.length; i += 1) {",
+                "    const t = tangents[i];",
+                "    // Project the carried frame back onto the plane perpendicular to this tangent.",
+                "    const n = carried.clone().sub(t.clone().multiplyScalar(carried.dot(t)));",
+                "    if (n.lengthSq() < 1e-12) {",
+                "      const fallback = Math.abs(t.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);",
+                "      n.copy(fallback.sub(t.clone().multiplyScalar(fallback.dot(t))));",
+                "    }",
+                "    n.normalize();",
+                "    normals.push(n);",
+                "    binormals.push(new THREE.Vector3().crossVectors(t, n).normalize());",
+                "    carried = n;",
+                "  }",
+                "",
+                "  const positions: number[] = [];",
+                "  const uvs: number[] = [];",
+                "  const indices: number[] = [];",
+                "  const ringStart: number[] = [];",
+                "  const isPoint: boolean[] = [];",
+                "",
+                "  for (let i = 0; i < stations.length; i += 1) {",
+                "    const st = stations[i];",
+                "    const v = i / (stations.length - 1);",
+                "    ringStart.push(positions.length / 3);",
+                "    // A station whose section has collapsed emits ONE vertex, not a ring of radius zero.",
+                "    // A degenerate ring still carries `radial` coincident vertices and `radial` zero-area",
+                "    // triangles, so the lock ends in a blunt cap the width of the floating-point noise",
+                "    // rather than at a point -- and a hair lock, a horn or a blade tip has to reach a point.",
+                "    if (st.rx <= 1e-6 && st.rz <= 1e-6) {",
+                "      isPoint.push(true);",
+                "      positions.push(centres[i].x, centres[i].y, centres[i].z);",
+                "      uvs.push(0.5, v);",
+                "      continue;",
+                "    }",
+                "    isPoint.push(false);",
+                "    const twist = ((st.twist ?? 0) * Math.PI) / 180;",
+                "    for (let j = 0; j <= radial; j += 1) {",
+                "      const theta = (j / radial) * Math.PI * 2 + twist;",
+                "      const offset = normals[i].clone().multiplyScalar(Math.cos(theta) * st.rx)",
+                "        .add(binormals[i].clone().multiplyScalar(Math.sin(theta) * st.rz));",
+                "      const p = centres[i].clone().add(offset);",
+                "      positions.push(p.x, p.y, p.z);",
+                "      uvs.push(j / radial, v);",
+                "    }",
+                "  }",
+                "",
+                "  for (let i = 0; i < stations.length - 1; i += 1) {",
+                "    const a0 = ringStart[i];",
+                "    const b0 = ringStart[i + 1];",
+                "    if (isPoint[i] && isPoint[i + 1]) continue;   // two collapsed stations bound nothing",
+                "    for (let j = 0; j < radial; j += 1) {",
+                "      if (isPoint[i]) indices.push(a0, b0 + j, b0 + j + 1);",
+                "      else if (isPoint[i + 1]) indices.push(a0 + j, b0, a0 + j + 1);",
+                "      else indices.push(a0 + j, b0 + j, a0 + j + 1, a0 + j + 1, b0 + j, b0 + j + 1);",
+                "    }",
+                "  }",
+                "",
+                "  if (sweep.capEnds ?? true) {",
+                "    for (const end of [0, stations.length - 1]) {",
+                "      if (isPoint[end]) continue;   // a point end is already closed",
+                "      const centreIndex = positions.length / 3;",
+                "      positions.push(centres[end].x, centres[end].y, centres[end].z);",
+                "      uvs.push(0.5, end === 0 ? 0 : 1);",
+                "      const base = ringStart[end];",
+                "      for (let j = 0; j < radial; j += 1) {",
+                "        if (end === 0) indices.push(centreIndex, base + j + 1, base + j);",
+                "        else indices.push(centreIndex, base + j, base + j + 1);",
+                "      }",
+                "    }",
+                "  }",
+                "",
+                "  const geometry = new THREE.BufferGeometry();",
+                "  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));",
+                "  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));",
+                "  geometry.setIndex(indices);",
+                "  geometry.computeVertexNormals();",
+                "  return geometry;",
                 "}",
                 "",
             ]
@@ -2873,12 +3348,34 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 f"  if (!{endpoint_var}) {{",
                 f"    {component_var}Geometry.scale({scale_vector(component, transform)});",
                 "  }",
+                # After the scale, so the ramp spans the mass's real extent rather than its unit
+                # extent, and before the mesh, so the colour attribute exists when the material
+                # reads it.
+                *(
+                    [
+                        f"  applyRootTipGradient({component_var}Geometry, "
+                        f"{json.dumps(gradient['rootColor'])}, {json.dumps(gradient['tipColor'])}, "
+                        f"{json.dumps(gradient['axis'])});"
+                    ]
+                    if (gradient := root_tip_gradient(component))
+                    else []
+                ),
                 f"  const {component_var} = new THREE."
                 f"{'SkinnedMesh' if component_id in skinned_ids else 'Mesh'}(",
                 f"    {component_var}Geometry,",
                 f"    {material_expression}",
                 "  );",
                 f"  {component_var}.name = {json.dumps(name)};",
+                # Cloned before enabling vertex colours: materials are shared by id, and flipping
+                # the flag in place would tint every other component using the same material.
+                *(
+                    [
+                        f"  {component_var}.material = {component_var}.material.clone();",
+                        f"  {component_var}.material.vertexColors = true;",
+                    ]
+                    if root_tip_gradient(component)
+                    else []
+                ),
                 f"  if ({endpoint_var}) {{",
                 f"    {component_var}.position.copy({endpoint_var}.midpoint);",
                 f"    {component_var}.quaternion.copy({endpoint_var}.quaternion);",
@@ -2992,6 +3489,30 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 "  }",
             ]
         )
+
+    # Deferred to here, after every node is parented, because the march runs in the TARGET's frame
+    # and needs both world matrices. Running it at each component's own emission site would depend
+    # on the target already existing, which makes a legal forward reference silently do nothing.
+    if stand_proud_jobs or stand_proud_skipped:
+        lines.append("")
+        lines.append("  // standProud: hold these components outside the surfaces they cover.")
+        for note in stand_proud_skipped:
+            lines.append(f"  // SKIPPED {note}")
+        for job in stand_proud_jobs:
+            marcher = json.dumps(job["componentId"])
+            proud_target_key = json.dumps(job["targetId"])
+            lines.extend([
+                f"  if (meshes[{marcher}] && nodes[{proud_target_key}]) {{",
+                "    applyStandProud(",
+                f"      meshes[{marcher}].geometry,",
+                f"      meshes[{marcher}],",
+                f"      nodes[{proud_target_key}],",
+                f"      {json_literal({'rings': job['rings']})},",
+                f"      {job['clearance']},",
+                f"      {job['maxPush']},",
+                "    );",
+                "  }",
+            ])
 
     lines.extend(emit_rig_hierarchy(spec))
 
