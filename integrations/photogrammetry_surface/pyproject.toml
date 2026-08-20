@@ -1,0 +1,14 @@
+[project]
+name = "img2threejs-photogrammetry-surface"
+version = "0.1.0"
+description = "Optional multi-view photogrammetry front end that produces the same oriented point cloud a GLB baseline would, so photos reach the existing Surface Nets reconstruction"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "numpy>=1.26,<3",
+  "pillow>=11,<13",
+  "pycolmap>=4.1,<5",
+  "scipy>=1.11,<2",
+]
+
+[tool.uv]
+package = false

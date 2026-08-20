@@ -81,7 +81,12 @@ for the full stage → script → output file map.
   normal no-baseline-assets rule (it was a one-off, authorised exception for girl-character) — read its
   own docstring in full before ever setting that env var for a new character.
 - `python/build_head_surface.py`, `python/export_sdf_surfaces.py` — Stage 2: SDF splat + Surface Nets,
-  per node, batched across a character's node list.
+  per node, batched across a character's node list. `build_head_surface.py` takes its
+  oriented point cloud from a GLB by default, but the splat and Surface Nets below that reader are
+  source-agnostic: set `CHARACTER_CLOUD_NPZ` to an `.npz` holding `P` (n,3) and `N` (n,3) and the same
+  reconstruction runs on a cloud from anywhere — see `integrations/photogrammetry_surface/`, which
+  produces one from multi-view photographs. `CHARACTER_SPLAT_RADIUS_CELLS` (default 2.5) widens the
+  splat for a noisier, non-mesh-sampled source.
 - `node/verify_cells.mjs` — Stage 3 pre-check: rebuild every triangle from cell adjacency alone and diff
   against the source; must show 0 collisions before any encoder byte is written.
 - `node/encode_surfaces.mjs`, `node/emit_surface_module.mjs` — Stage 3: compact varint + connectivity

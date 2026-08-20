@@ -27,7 +27,12 @@ import numpy as np
 ROOT = Path(os.environ.get('IMG2THREEJS_SHOWCASE_ROOT', '.')).resolve()
 NODE = int(sys.argv[1]) if len(sys.argv) > 1 else 9
 CELL = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0012
-RADIUS = CELL * 2.5
+# Splat radius as a multiple of the cell. 2.5 is right for a cloud sampled off a clean mesh, where the
+# only "noise" is triangle density. A photogrammetry cloud carries real per-point error (about a
+# millimetre on the measured fixture), and at 2.5 the contour follows that noise instead of the
+# surface -- it renders as a speckled shell full of holes, which no accuracy median reveals. A larger
+# radius averages more points per cell and is the lever for a noisy source. Default unchanged.
+RADIUS = CELL * float(os.environ.get('CHARACTER_SPLAT_RADIUS_CELLS', '2.5'))
 PAD = RADIUS * 2
 
 # PACKAGED (v1.5.1). GLB path and output directory are overridable so a second character can be built in
@@ -37,23 +42,55 @@ GLB_PATH = Path(os.environ.get('CHARACTER_GLB', str(ROOT / 'public/mesh/girl-cha
 OUT_DIR = Path(os.environ.get('CHARACTER_WORKDIR', str(ROOT / 'work/head')))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-raw = GLB_PATH.read_bytes()
-off, chunks = 12, {}
-while off < len(raw):
-    ln, ty = struct.unpack_from('<II', raw, off); chunks[ty] = raw[off+8:off+8+ln]; off += 8+ln
-    off = off if off % 4 == 0 else off + (4 - off % 4)
-g = json.loads(chunks[0x4E4F534A].decode()); BIN = chunks[0x004E4942]
-def acc(i):
-    a=g['accessors'][i]; bv=g['bufferViews'][a['bufferView']]
-    dt={5120:'i1',5121:'u1',5122:'i2',5123:'u2',5125:'u4',5126:'f4'}[a['componentType']]
-    nc={'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4}[a['type']]
-    o=bv.get('byteOffset',0)+a.get('byteOffset',0)
-    return np.frombuffer(BIN,dtype=np.dtype('<'+dt),count=a['count']*nc,offset=o).reshape(a['count'],nc)
-prims = g['meshes'][g['nodes'][NODE]['mesh']]['primitives']
-P = np.concatenate([acc(p['attributes']['POSITION']) for p in prims]).astype(np.float64)
-N = np.concatenate([acc(p['attributes']['NORMAL']) for p in prims]).astype(np.float64)
+# THE SPLAT AND SURFACE NETS BELOW NEED EXACTLY TWO THINGS: oriented points `P` and unit normals `N`.
+# Nothing after this block knows or cares where they came from -- that was already true when the only
+# reader was a GLB, and it is what lets a photogrammetry cloud reach the same reconstruction without
+# reimplementing any of it. Set CHARACTER_CLOUD_NPZ to an .npz holding `P` (n,3) and `N` (n,3) to use
+# a cloud from any other source; leave it unset and the GLB path is read exactly as before.
+CLOUD_NPZ = os.environ.get('CHARACTER_CLOUD_NPZ')
+
+
+def _cloud_from_npz(path: Path):
+    """Oriented point cloud from a source that is not a GLB (see integrations/photogrammetry_surface)."""
+    with np.load(path) as data:
+        if 'P' not in data or 'N' not in data:
+            raise SystemExit(f"{path}: expected arrays 'P' and 'N' (got {sorted(data.keys())})")
+        points = np.asarray(data['P'], dtype=np.float64)
+        normals = np.asarray(data['N'], dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 3 or normals.shape != points.shape:
+        raise SystemExit(f"{path}: P and N must both be (n, 3); got {points.shape} and {normals.shape}")
+    if len(points) == 0:
+        raise SystemExit(f"{path}: cloud is empty")
+    return points, normals
+
+
+def _cloud_from_glb(path: Path, node: int):
+    raw = path.read_bytes()
+    off, chunks = 12, {}
+    while off < len(raw):
+        ln, ty = struct.unpack_from('<II', raw, off); chunks[ty] = raw[off+8:off+8+ln]; off += 8+ln
+        off = off if off % 4 == 0 else off + (4 - off % 4)
+    g = json.loads(chunks[0x4E4F534A].decode()); BIN = chunks[0x004E4942]
+    def acc(i):
+        a=g['accessors'][i]; bv=g['bufferViews'][a['bufferView']]
+        dt={5120:'i1',5121:'u1',5122:'i2',5123:'u2',5125:'u4',5126:'f4'}[a['componentType']]
+        nc={'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4}[a['type']]
+        o=bv.get('byteOffset',0)+a.get('byteOffset',0)
+        return np.frombuffer(BIN,dtype=np.dtype('<'+dt),count=a['count']*nc,offset=o).reshape(a['count'],nc)
+    prims = g['meshes'][g['nodes'][node]['mesh']]['primitives']
+    points = np.concatenate([acc(p['attributes']['POSITION']) for p in prims]).astype(np.float64)
+    normals = np.concatenate([acc(p['attributes']['NORMAL']) for p in prims]).astype(np.float64)
+    return points, normals
+
+
+if CLOUD_NPZ:
+    P, N = _cloud_from_npz(Path(CLOUD_NPZ))
+    source_label = f"cloud {Path(CLOUD_NPZ).name}"
+else:
+    P, N = _cloud_from_glb(GLB_PATH, NODE)
+    source_label = f"node {NODE}"
 N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
-print(f"node {NODE}: {len(P):,} vertices, cell {CELL*1000:.2f} mm")
+print(f"{source_label}: {len(P):,} vertices, cell {CELL*1000:.2f} mm")
 
 lo = P.min(axis=0) - PAD
 hi = P.max(axis=0) + PAD

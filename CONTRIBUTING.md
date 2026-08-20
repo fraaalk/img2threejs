@@ -26,6 +26,10 @@ character reconstruction pipeline (SDF point-cloud splat + Surface Nets) that ru
 showcase checkout via `IMG2THREEJS_SHOWCASE_ROOT`, isolated behind its own `pyproject.toml`/`uv.lock`
 and `node/package.json` so the `forge` core stays dependency-free. It only applies when a character
 build actually has a GLB reference to measure — skip it entirely otherwise. See its `README.md`.
+`integrations/photogrammetry_surface/` is the same idea without the GLB: it reconstructs the
+oriented point cloud from multi-view photographs instead, feeding the identical Surface Nets
+reconstruction through a tested seam. Its `PIPELINE.md` carries measured accuracy against ground
+truth, including where it currently falls short of the GLB route.
 
 ## Development
 
