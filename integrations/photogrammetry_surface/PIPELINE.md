@@ -226,27 +226,33 @@ resolution**, then add planes (`--planes`) to match the finer disparity, then mo
 
 ## Reproducing every number above
 
+Write fixtures somewhere durable, **not `/tmp`**. A 24-view 1024px run costs about 1h45m of CPU and
+the whole set was lost once to a `/tmp` sweep at a date rollover, which meant re-measuring rather than
+re-reading. Use a work directory inside the repo's own ignored scratch space, or anywhere you would be
+willing to keep a build artifact.
+
 ```bash
 cd integrations/photogrammetry_surface
+WORK=work/mvs-fixture       # anywhere durable; NOT /tmp
 
 # 1. manufacture the fixture (validation only; the pipeline never reads its ground truth)
 uv run --project . python3 python/render_views.py \
   --glb $IMG2THREEJS_SHOWCASE_ROOT/public/mesh/girl-character-baseline.glb \
-  --node 9 --out /tmp/fixture --views 12 --size 512 --elevations 0,20
+  --node 9 --out "$WORK" --views 12 --size 512 --elevations 0,20
 
 # 2. images -> cloud
 uv run --project . python3 python/photos_to_cloud.py \
-  --images /tmp/fixture --cameras /tmp/fixture/cameras.json \
-  --out /tmp/fixture/cloud.npz --cell 0.0015 --planes 96 --report /tmp/fixture/report.json
+  --images "$WORK" --cameras "$WORK/cameras.json" \
+  --out "$WORK/cloud.npz" --cell 0.0015 --planes 96 --report "$WORK/report.json"
 
 # 3. score the cloud against the mesh it never saw
 uv run --project . python3 python/verify_reconstruction.py \
-  --cloud /tmp/fixture/cloud.npz \
+  --cloud "$WORK/cloud.npz" \
   --glb $IMG2THREEJS_SHOWCASE_ROOT/public/mesh/girl-character-baseline.glb --node 9
 
 # 4. cloud -> surface, through the shared reconstruction
-CHARACTER_CLOUD_NPZ=/tmp/fixture/cloud.npz CHARACTER_SPLAT_RADIUS_CELLS=6 \
-CHARACTER_WORKDIR=/tmp/fixture/surface \
+CHARACTER_CLOUD_NPZ="$WORK/cloud.npz" CHARACTER_SPLAT_RADIUS_CELLS=6 \
+CHARACTER_WORKDIR="$WORK/surface" \
   uv run --project ../glb_character_pipeline python3 \
   ../glb_character_pipeline/python/build_head_surface.py 9 0.0015
 ```
