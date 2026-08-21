@@ -65,6 +65,82 @@ def summarise(name: str, distances: np.ndarray) -> dict:
     }
 
 
+def umeyama(source: np.ndarray, target: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+    """Similarity transform (scale, rotation, translation) minimising ||s*R*source + t - target||.
+
+    Closed form (Umeyama 1991). Reflections are excluded: the SVD's smallest singular direction is
+    flipped when the determinant comes out negative, because a mirrored reconstruction can score well
+    on distance while being the wrong handedness -- which for a face is not a small error.
+    """
+    src_mean = source.mean(axis=0)
+    dst_mean = target.mean(axis=0)
+    src_c = source - src_mean
+    dst_c = target - dst_mean
+    cov = dst_c.T @ src_c / len(source)
+    U, S, Vt = np.linalg.svd(cov)
+    d = np.ones(3)
+    if np.linalg.det(U @ Vt) < 0:
+        d[2] = -1.0
+    R = U @ np.diag(d) @ Vt
+    var = (src_c ** 2).sum() / len(source)
+    scale = float((S * d).sum() / max(var, 1e-18))
+    t = dst_mean - scale * R @ src_mean
+    return scale, R, t
+
+
+def align_similarity(source: np.ndarray, target: np.ndarray, iterations: int = 30,
+                     sample: int = 40000) -> tuple[float, np.ndarray, np.ndarray]:
+    """Register `source` onto `target` up to scale, without correspondences.
+
+    WHY THIS IS REQUIRED, NOT OPTIONAL. Structure from motion recovers shape, never absolute size or
+    world placement -- the reconstruction comes out in an arbitrary unit at an arbitrary pose. Scoring
+    it against ground truth without aligning first measures the arbitrary choice, not the
+    reconstruction, and every millimetre reported would be noise. Alignment is the only way an SfM
+    result can be scored at all.
+
+    Coarse initialisation from centroid, principal axes and extent, then ICP with a similarity fit per
+    iteration. Principal axes carry a sign ambiguity, so all four determinant-positive combinations are
+    tried and the best-scoring one is kept -- picking one arbitrarily lands in a local minimum that
+    looks like a bad reconstruction rather than a bad initialisation.
+    """
+    from scipy.spatial import cKDTree
+
+    rng = np.random.default_rng(0)
+    src_s = source[rng.choice(len(source), min(sample, len(source)), replace=False)]
+    tree = cKDTree(target)
+
+    def principal(points: np.ndarray) -> np.ndarray:
+        centred = points - points.mean(axis=0)
+        _, vecs = np.linalg.eigh(centred.T @ centred / len(points))
+        return vecs[:, ::-1]                      # descending variance
+
+    src_axes = principal(src_s)
+    dst_axes = principal(target)
+    scale0 = float(np.linalg.norm(target.max(0) - target.min(0))
+                   / max(np.linalg.norm(source.max(0) - source.min(0)), 1e-12))
+
+    best = None
+    for flip in ((1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)):
+        R0 = dst_axes @ np.diag(flip) @ src_axes.T
+        if np.linalg.det(R0) < 0:
+            continue
+        t0 = target.mean(axis=0) - scale0 * R0 @ source.mean(axis=0)
+        scale, R, t = scale0, R0, t0
+        for _ in range(iterations):
+            moved = scale * (src_s @ R.T) + t
+            _, idx = tree.query(moved, k=1, workers=-1)
+            scale, R, t = umeyama(src_s, target[idx])
+        moved = scale * (src_s @ R.T) + t
+        residual, _ = tree.query(moved, k=1, workers=-1)
+        score = float(np.median(residual))
+        if best is None or score < best[0]:
+            best = (score, scale, R, t)
+
+    if best is None:                              # no determinant-positive candidate; identity
+        return 1.0, np.eye(3), np.zeros(3)
+    return best[1], best[2], best[3]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cloud", required=True)
@@ -72,6 +148,10 @@ def main() -> int:
     ap.add_argument("--node", type=int, required=True)
     ap.add_argument("--sample", type=int, default=120000,
                     help="cap on points scored per direction, sampled deterministically")
+    ap.add_argument("--align-similarity", action="store_true",
+                    help="register the cloud onto the truth up to scale before scoring. REQUIRED for "
+                         "an SfM reconstruction, whose scale and placement are arbitrary; without it "
+                         "every distance reported measures that arbitrary choice instead")
     ap.add_argument("--json", default=None)
     args = ap.parse_args()
 
@@ -83,6 +163,18 @@ def main() -> int:
     GN = truth["N"]
 
     print(f"reconstruction: {len(P):,} points | ground truth: {len(G):,} vertices")
+
+    alignment = None
+    if args.align_similarity:
+        scale, R, t = align_similarity(P, G)
+        P = scale * (P @ R.T) + t
+        N = N @ R.T                    # a rotation carries normals; uniform scale leaves them alone
+        N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+        alignment = {"scale": scale, "rotationDet": float(np.linalg.det(R)),
+                     "translation": t.tolist()}
+        print(f"  aligned up to scale: factor {scale:.4f}, det(R) {np.linalg.det(R):+.4f}")
+        print(f"  NOTE: scale was FITTED, so it is not evidence about size -- only shape is scored")
+
     ext_p = P.max(axis=0) - P.min(axis=0)
     ext_g = G.max(axis=0) - G.min(axis=0)
     print(f"  extent recon {np.round(ext_p, 4).tolist()}")
@@ -133,6 +225,7 @@ def main() -> int:
             "points": int(len(P)),
             "extentRecon": ext_p.tolist(),
             "extentTruth": ext_g.tolist(),
+            "alignment": alignment,
             "accuracy": accuracy,
             "completeness": completeness,
             "normals": normal_report,

@@ -79,9 +79,14 @@ integrations/photogrammetry_surface/photos-to-surface.sh \
 
 Structure from motion cannot recover absolute size — a doll photographed close and a statue
 photographed far produce identical image evidence. Under `--sfm` the reconstruction is
-self-consistent but **not metric**, so a `--cell` in millimetres means nothing against it until the
-scale is set from a known real dimension (`sfm_poses.rescale`). The orchestrator prints this warning
-on every `--sfm` run rather than letting a wrong millimetre figure reach a gate that trusts it.
+self-consistent but **not metric**, so a `--cell` in millimetres means nothing against it.
+
+**There is no flag that fixes this yet.** `sfm_poses.rescale()` computes the factor from one known
+real dimension, and nothing calls it — a caller must apply it to the cloud. Treat every millimetre
+figure from an `--sfm` run as arbitrary units until that is wired up. The orchestrator prints the
+warning on every `--sfm` run rather than letting a wrong figure reach a gate that trusts it, and
+`verify_reconstruction.py --align-similarity` exists precisely so an unscaled reconstruction can still
+be scored on **shape** (it fits the scale, so its numbers say nothing about size).
 
 ## What's here
 

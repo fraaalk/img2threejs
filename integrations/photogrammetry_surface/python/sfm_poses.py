@@ -10,9 +10,14 @@ dense_mvs.py's job, and this module stops at poses.
 SCALE IS ARBITRARY, AND THAT MATTERS DOWNSTREAM. SfM from images alone cannot know absolute size --
 a doll photographed close and a statue photographed far give identical image evidence. The
 reconstruction comes out in an arbitrary unit, so a cell size in millimetres means nothing against it
-until the scale is fixed. `--scale-longest` or `--scale-from-sparse` resolve that against a known
-real dimension; without one, the emitted cloud is self-consistent but not metric, and this module
-says so rather than letting a silently-wrong millimetre figure propagate into a gate.
+until the scale is fixed.
+
+There is currently NO command-line flag that fixes it. `rescale()` below computes the factor from one
+known real dimension, and nothing calls it yet: a caller has to apply it to the cloud itself. Said
+plainly rather than implied, because a docstring that advertises a `--scale-longest` option which does
+not exist is worse than one that admits the gap -- and this docstring did exactly that until the flag
+was looked for and found missing. Until a caller wires it up, treat every millimetre figure derived
+from an `--sfm` run as being in arbitrary units.
 """
 from __future__ import annotations
 
@@ -70,9 +75,12 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
 
     if not database.exists():
         print(f"  COLMAP: extracting features from {len(images)} images")
-        options = pycolmap.SiftExtractionOptions()
-        pycolmap.extract_features(database, image_dir, camera_model=camera_model,
-                                  sift_options=options)
+        # The camera model belongs to ImageReaderOptions, not to a keyword on extract_features, and
+        # there is no `sift_options=` parameter in pycolmap 4.x. Both were assumed once and neither
+        # exists -- which is why this path is exercised by an actual run rather than only read.
+        reader = pycolmap.ImageReaderOptions()
+        reader.camera_model = camera_model
+        pycolmap.extract_features(database, image_dir, reader_options=reader)
         print("  COLMAP: exhaustive matching")
         pycolmap.match_exhaustive(database)
     else:
@@ -101,11 +109,17 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
 
     cams: list[Camera] = []
     for image in reconstruction.images.values():
-        if hasattr(image, "has_pose") and not image.has_pose:
+        has_pose = image.has_pose
+        if callable(has_pose):
+            has_pose = has_pose()
+        if not has_pose:
             continue
         colmap_cam = reconstruction.cameras[image.camera_id]
         K = _intrinsics_from_colmap(colmap_cam)
-        rigid = image.cam_from_world
+        # `cam_from_world` is a METHOD on pycolmap 4.x, not a property. Reading it as an attribute
+        # yields the bound method and fails on `.rotation` -- one of three API details in this file
+        # that were assumed correct and were not, all three found by running it rather than reading it.
+        rigid = image.cam_from_world() if callable(image.cam_from_world) else image.cam_from_world
         R = np.array(rigid.rotation.matrix(), dtype=np.float64)
         t = np.array(rigid.translation, dtype=np.float64)
         cams.append(Camera(K, R, t, colmap_cam.width, colmap_cam.height, Path(image.name).stem))

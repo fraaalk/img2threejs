@@ -108,6 +108,10 @@ def main() -> int:
     ap.add_argument("--cameras", help="cameras.json with known poses")
     ap.add_argument("--sfm", action="store_true", help="estimate poses from the images with COLMAP")
     ap.add_argument("--sfm-work", default=None, help="scratch dir for COLMAP (default: <images>/_sfm)")
+    ap.add_argument("--scale-longest", type=float, default=None,
+                    help="the subject's longest real dimension in metres. SfM cannot recover absolute "
+                         "size, so without this an --sfm run is NOT metric and every millimetre figure "
+                         "it reports -- including --cell -- is in arbitrary units")
     ap.add_argument("--out", required=True, help="destination .npz holding P and N")
     ap.add_argument("--cell", type=float, default=0.0015,
                     help="reconstruction cell size the cloud will be splatted at; the fusion voxel is "
@@ -129,17 +133,33 @@ def main() -> int:
     ap.add_argument("--mls-k", type=int, default=24,
                     help="neighbours in the MLS plane fit that denoises the cloud")
     ap.add_argument("--mls-iterations", type=int, default=1,
-                    help="MLS passes; 0 disables. One quadric pass beats two on both noise and "
-                         "curvature bias -- see fuse_cloud.mls_project")
+                    help="MLS passes; 0 disables. One pass beats two on both noise and shrinkage -- "
+                         "see fuse_cloud.mls_project")
     ap.add_argument("--max-views", type=int, default=0, help="0 = all; otherwise cap for a quick run")
     ap.add_argument("--report", default=None, help="write a JSON run report here")
     args = ap.parse_args()
 
     image_dir = Path(args.images)
+    scale_applied = None
     if args.sfm:
-        from sfm_poses import estimate_poses
+        from sfm_poses import estimate_poses, rescale, sparse_points
         work = Path(args.sfm_work) if args.sfm_work else image_dir / "_sfm"
         cams = estimate_poses(image_dir, work)
+        if args.scale_longest:
+            # Scale the CAMERAS, not the output cloud. Everything downstream -- the depth range, the
+            # sweep, the fusion voxel, the cell size -- is derived from camera geometry, so fixing the
+            # scale here puts the whole pipeline in metres. Scaling only the final cloud would leave
+            # every intermediate in SfM units and the millimetre-denominated parameters meaningless.
+            # x_cam = R x_world + t, so scaling world by s requires t scaled by s too.
+            factor = rescale(cams, sparse_points(work), args.scale_longest)
+            for cam in cams:
+                cam.t = cam.t * factor
+            scale_applied = factor
+            print(f"  scale set from --scale-longest {args.scale_longest} m: factor {factor:.6f}")
+            print(f"  the reconstruction is now metric, so millimetre figures below are real")
+        else:
+            print("  NOTE: no --scale-longest given, so this reconstruction is NOT metric. Every "
+                  "millimetre figure below, and --cell itself, is in arbitrary SfM units.")
     else:
         if not args.cameras:
             raise SystemExit("pass --cameras cameras.json, or --sfm to estimate poses from the images")
@@ -228,6 +248,8 @@ def main() -> int:
             "convergence": target.tolist(),
             "cameraRadius": radius,
             "perViewKeptPixels": fused["perView"],
+            "scaleApplied": scale_applied,
+            "isMetric": bool(scale_applied) or not args.sfm,
             "settings": {k: v for k, v in vars(args).items()},
         }, indent=1))
     return 0
