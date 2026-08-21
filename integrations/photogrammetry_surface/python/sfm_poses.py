@@ -12,12 +12,12 @@ a doll photographed close and a statue photographed far give identical image evi
 reconstruction comes out in an arbitrary unit, so a cell size in millimetres means nothing against it
 until the scale is fixed.
 
-There is currently NO command-line flag that fixes it. `rescale()` below computes the factor from one
-known real dimension, and nothing calls it yet: a caller has to apply it to the cloud itself. Said
-plainly rather than implied, because a docstring that advertises a `--scale-longest` option which does
-not exist is worse than one that admits the gap -- and this docstring did exactly that until the flag
-was looked for and found missing. Until a caller wires it up, treat every millimetre figure derived
-from an `--sfm` run as being in arbitrary units.
+`photos_to_cloud.py --scale-longest <metres>` fixes it, via `rescale()` below. It scales the CAMERAS
+rather than the output cloud, so every downstream quantity derived from camera geometry -- the depth
+range, the sweep, the fusion voxel, `--cell` itself -- lands in real units too; scaling only the final
+cloud would leave every intermediate in SfM units and the millimetre-denominated parameters
+meaningless. Without the flag a run still completes and is self-consistent, but is NOT metric, and
+`photos_to_cloud` says so on every such run.
 """
 from __future__ import annotations
 

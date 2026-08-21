@@ -70,23 +70,37 @@ integrations/photogrammetry_surface/photos-to-surface.sh \
    quarter of a 512px frame is the difference between a recognisable reconstruction and a lumpy
    shell.
 3. **Two elevations, not one.** A single orbit ring leaves the top and underside unconstrained.
-4. **Plain dark background, or supply masks.** Without a `<view>_mask.png` the subject is separated
-   by a dark-backdrop threshold, and the run report says how many views relied on that.
-5. **Fixed focus and exposure.** ZNCC tolerates a gain difference; it does not tolerate the subject
+4. **A background helps pose estimation and hurts nothing.** This is the one requirement that pulls in
+   two directions, so it is worth stating plainly: MVS wants the subject cleanly separated, while SfM
+   needs image features to recover pose from — and a featureless backdrop gives it none. Shoot against
+   an ordinary textured background and supply a `<view>_mask.png` per view (from a segmentation model,
+   or a lightbox shot of the same setup). Both halves then get what they need. Without a mask the
+   subject is separated by a dark-backdrop threshold instead, and the run report says how many views
+   relied on that.
+5. **Enough texture for the detector.** Under `--sfm`, pose comes from matched SIFT features, and a
+   smooth low-texture subject in a small frame does not produce them: a 512px synthetic fixture of a
+   CG head yielded only ~400 keypoints per view where a real photograph yields five to twenty thousand.
+   Resolution and surface texture are what move that number.
+6. **Fixed focus and exposure.** ZNCC tolerates a gain difference; it does not tolerate the subject
    changing size between frames.
 
 ### Scale is arbitrary under `--sfm`
 
 Structure from motion cannot recover absolute size — a doll photographed close and a statue
-photographed far produce identical image evidence. Under `--sfm` the reconstruction is
-self-consistent but **not metric**, so a `--cell` in millimetres means nothing against it.
+photographed far produce identical image evidence. So under `--sfm` you must supply one real
+dimension:
 
-**There is no flag that fixes this yet.** `sfm_poses.rescale()` computes the factor from one known
-real dimension, and nothing calls it — a caller must apply it to the cloud. Treat every millimetre
-figure from an `--sfm` run as arbitrary units until that is wired up. The orchestrator prints the
-warning on every `--sfm` run rather than letting a wrong figure reach a gate that trusts it, and
-`verify_reconstruction.py --align-similarity` exists precisely so an unscaled reconstruction can still
-be scored on **shape** (it fits the scale, so its numbers say nothing about size).
+```bash
+--scale-longest 0.26      # the subject's longest real extent, in metres
+```
+
+That scales the **cameras**, not just the output cloud, so the depth range, the sweep, the fusion
+voxel and `--cell` all end up in real millimetres. Omit it and the run still completes, but it is
+**not metric**: `--cell 0.0015` then means 1.5 arbitrary units, and the orchestrator says so on every
+run rather than letting a wrong figure reach a gate that trusts it.
+
+For scoring an unscaled reconstruction, `verify_reconstruction.py --align-similarity` fits scale and
+pose before measuring, so its numbers describe **shape only** and say nothing about size.
 
 ## What's here
 
