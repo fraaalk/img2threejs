@@ -83,11 +83,13 @@ def backdrop_mesh(centre: np.ndarray, radius: float, seed: int = 0,
     ], axis=-1).reshape(-1, 3)
     normals = centre - points
     normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
-    # NOT tiled. `rasterise._bilinear` clamps uv to [0,1] rather than wrapping -- correct for a glTF
-    # mesh whose UVs are already in range -- so a tiling factor here collapses the whole backdrop onto
-    # one edge texel and renders as flat grey. Detail comes from the 1024-square noise instead, which
-    # covers the visible part of the sphere at several hundred texels across the frame.
-    uvs = np.stack([uu, vv], axis=-1).reshape(-1, 2)
+    # Tiled, and the sampler must be told to WRAP (render(..., wrap_texture=True)). Two earlier
+    # attempts got this wrong in opposite directions: tiling with a clamping sampler collapsed the
+    # backdrop onto one edge texel and rendered flat grey, and then dropping the tiling stretched one
+    # 1024-square noise field over the whole sphere so the visible part was magnified into soft blur --
+    # low contrast, few corners, and the feature count barely moved. Tiling plus wrapping keeps the
+    # texture at its native resolution, which is what puts sharp blobs in frame for the detector.
+    uvs = np.stack([uu, vv], axis=-1).reshape(-1, 2) * 8.0
 
     tris = []
     for r in range(rings - 1):
@@ -174,7 +176,7 @@ def main() -> int:
         result = render(cam, mesh, texture)
         colour = result["colour"]
         if back_mesh is not None:
-            back = render(cam, back_mesh, back_texture)
+            back = render(cam, back_mesh, back_texture, wrap_texture=True)
             # Composite: the subject always wins where it exists. The backdrop sits far enough out that
             # a depth test would say the same thing, so this is a shortcut, not a different answer.
             colour = np.where(result["mask"][..., None], colour, back["colour"])

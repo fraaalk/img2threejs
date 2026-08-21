@@ -80,7 +80,13 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
         # exists -- which is why this path is exercised by an actual run rather than only read.
         reader = pycolmap.ImageReaderOptions()
         reader.camera_model = camera_model
-        pycolmap.extract_features(database, image_dir, reader_options=reader)
+        # PASS THE FILE LIST, NOT JUST THE DIRECTORY. extract_features globs the directory when
+        # image_names is empty, which silently swept up the 24 `<view>_mask.png` files a fixture writes
+        # alongside its views: COLMAP indexed 48 images, half of them black-and-white silhouettes
+        # yielding 7-56 keypoints, and the mapper then tried to register them. Filtering the list used
+        # for the printed count is not enough -- COLMAP has to be told.
+        pycolmap.extract_features(database, image_dir, image_names=[p.name for p in images],
+                                  reader_options=reader)
         print("  COLMAP: exhaustive matching")
         pycolmap.match_exhaustive(database)
     else:

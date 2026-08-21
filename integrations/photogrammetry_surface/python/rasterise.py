@@ -16,9 +16,19 @@ from __future__ import annotations
 import numpy as np
 
 
-def _bilinear(texture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
-    """Sample an (h, w, 3) uint8 texture at uv in [0,1], v measured DOWN from the top (glTF)."""
+def _bilinear(texture: np.ndarray, u: np.ndarray, v: np.ndarray,
+              wrap: bool = False) -> np.ndarray:
+    """Sample an (h, w, 3) uint8 texture at uv, v measured DOWN from the top (glTF).
+
+    `wrap=False` clamps uv into [0,1], which is right for a glTF mesh whose UVs are already in range.
+    `wrap=True` tiles instead, which is what a UV multiplied by a tiling factor needs. Wrapping has to
+    happen HERE, per sample, not by pre-wrapping vertex UVs -- a wrapped vertex UV puts a whole
+    texture's worth of gradient across one triangle and renders as a visible seam.
+    """
     h, w = texture.shape[:2]
+    if wrap:
+        u = np.mod(u, 1.0)
+        v = np.mod(v, 1.0)
     x = np.clip(u * w - 0.5, 0, w - 1)
     y = np.clip(v * h - 0.5, 0, h - 1)
     x0 = np.floor(x).astype(np.int64); x1 = np.minimum(x0 + 1, w - 1)
@@ -31,7 +41,7 @@ def _bilinear(texture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 
 def render(camera, mesh: dict, texture: np.ndarray | None = None,
-           fast_path: bool = True) -> dict:
+           fast_path: bool = True, wrap_texture: bool = False) -> dict:
     """Rasterise `mesh` from `camera`.
 
     Returns `colour` (h,w,3 uint8), `depth` (h,w float64, camera-space z, inf where empty),
@@ -136,7 +146,7 @@ def render(camera, mesh: dict, texture: np.ndarray | None = None,
         normal[mask] = nrm
         if texture is not None:
             uvs = (UV[verts] * wts[:, :, None]).sum(axis=1)
-            rgb = _bilinear(texture, uvs[:, 0], uvs[:, 1])
+            rgb = _bilinear(texture, uvs[:, 0], uvs[:, 1], wrap=wrap_texture)
         else:
             rgb = np.full((len(sel), 3), 200.0)
         # Lambert shading against a fixed headlight, so a textureless region still carries the

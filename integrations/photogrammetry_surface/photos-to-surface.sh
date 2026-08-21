@@ -61,8 +61,9 @@ POSE_ARGS=()
 if [ "$USE_SFM" -eq 1 ]; then
   POSE_ARGS+=(--sfm --sfm-work "$OUT_DIR/sfm")
   echo "  poses: COLMAP SfM. NOTE: scale from images alone is ARBITRARY -- a --cell in millimetres"
-  echo "  means nothing against an unscaled reconstruction. Set the scale from a known dimension"
-  echo "  before trusting any millimetre figure downstream."
+  echo "  means nothing against an unscaled reconstruction. Pass --scale-longest <metres> (the"
+  echo "  subject's longest real dimension) to make the run metric; without it, treat every"
+  echo "  millimetre figure downstream, --cell included, as arbitrary units."
 else
   POSE_ARGS+=(--cameras "$CAMERAS")
 fi
