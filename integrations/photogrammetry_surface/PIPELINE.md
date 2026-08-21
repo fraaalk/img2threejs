@@ -129,6 +129,43 @@ Four choices carry the quality, each for a stated reason:
   actionable message rather than silently producing noise. This is a real capture constraint: 8 views
   around a subject (45° apart) fails; 12 (30°) works.
 
+### Measured: the full SfM route, end to end
+
+24 views at 512px with a textured backdrop and supplied masks, poses from COLMAP (validated at 0.01%
+against known poses), scale from `--scale-longest 0.2596`:
+
+| | SfM route | known-pose route |
+|---|---|---|
+| points | 168,409 | 180,333 |
+| accuracy median (after alignment) | 5.40 mm | 1.24 mm |
+| completeness median | 9.01 mm | 2.40 mm |
+| normal error median | 30.1° | 14.3° |
+
+**Do not read that gap as the cost of estimating poses.** The two runs differ in the *background* as
+well as the pose source — the SfM fixture needs a textured backdrop, the known-pose one used black —
+and there is a known defect that makes exactly that difference matter:
+
+**The subject mask restricts the OUTPUT but not the correlation window.** `sweep_depth` zeroes depth
+and confidence outside `masks[ref]`, but the ZNCC window itself is computed over raw pixels. Within
+half a window of the silhouette, that window straddles subject and backdrop, and the backdrop sits at a
+completely different depth — so those windows cannot match consistently in any view. On a black
+backdrop this was harmless (no variance to inject, and the `support` test absorbed it); against a
+textured backdrop it actively feeds in wrong signal. Making the window mask-aware is the obvious next
+step and is **not implemented**.
+
+So the honest statement is: the SfM route is measured at 5.40 mm on a fixture that also carries this
+defect, and how much of the gap is pose estimation versus the unmasked window is **not yet separated**.
+Running the known-pose route on the *same* textured-backdrop fixture would separate them, and has not
+been done.
+
+**Also note the scale bias.** `--scale-longest` measures the extent of the *sparse* subject points, and
+sparse features cluster where texture is (hair, edges) rather than spanning the whole subject. Here the
+sparse subject spanned 1.588 units where the true extent implied more, so the factor came out high and
+the reconstruction ended ~19% too large — visible as the similarity alignment fitting 0.8366 rather
+than 1.000. A run scored without `--align-similarity` therefore reports metres of error (1446 mm here)
+purely because SfM's world frame is arbitrary; the raw comparison is meaningless for an SfM run, which
+is what the alignment flag exists for.
+
 ## Stage 3 — Cross-view consistency
 
 The single largest quality lever. Photometric agreement alone accepts a wrong depth wherever texture
