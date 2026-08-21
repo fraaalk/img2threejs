@@ -108,6 +108,11 @@ def main() -> int:
     ap.add_argument("--cameras", help="cameras.json with known poses")
     ap.add_argument("--sfm", action="store_true", help="estimate poses from the images with COLMAP")
     ap.add_argument("--sfm-work", default=None, help="scratch dir for COLMAP (default: <images>/_sfm)")
+    ap.add_argument("--intrinsics", default=None,
+                    help="'f,cx,cy' in pixels, pinning the camera instead of letting bundle adjustment "
+                         "solve for it. Strongly recommended: left free on the reference fixture COLMAP "
+                         "settled 36%% low on focal length, absorbed the error into radial distortion, "
+                         "and still reported all views registered")
     ap.add_argument("--scale-longest", type=float, default=None,
                     help="the subject's longest real dimension in metres. SfM cannot recover absolute "
                          "size, so without this an --sfm run is NOT metric and every millimetre figure "
@@ -145,7 +150,13 @@ def main() -> int:
     if args.sfm:
         from sfm_poses import estimate_poses
         sfm_work = Path(args.sfm_work) if args.sfm_work else image_dir / "_sfm"
-        cams = estimate_poses(image_dir, sfm_work)
+        prior = None
+        if args.intrinsics:
+            parts = [float(v) for v in args.intrinsics.split(",")]
+            if len(parts) != 3:
+                raise SystemExit("--intrinsics wants exactly 'f,cx,cy' in pixels")
+            prior = (parts[0], parts[1], parts[2])
+        cams = estimate_poses(image_dir, sfm_work, intrinsics=prior)
     else:
         if not args.cameras:
             raise SystemExit("pass --cameras cameras.json, or --sfm to estimate poses from the images")

@@ -33,27 +33,70 @@ from cameras import Camera  # noqa: E402
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 
+MAX_IGNORED_DISTORTION = 0.005
+
+
 def _intrinsics_from_colmap(camera) -> np.ndarray:
-    """K from any of COLMAP's pinhole-family models; anything else is refused rather than guessed."""
+    """K from a COLMAP camera, REFUSING any model whose distortion this pipeline cannot honour.
+
+    THE WHOLE PIPELINE IS AN UNDISTORTED PINHOLE. `cameras.py` projects with K alone, so any radial or
+    tangential coefficient COLMAP fitted is simply discarded -- and a discarded distortion term is not a
+    small error. It means the sweep reprojects every pixel to a slightly wrong place in every neighbour
+    view, ZNCC stops agreeing, and the depth maps come back nearly empty. Measured on the reference
+    fixture: COLMAP fitted `k1 = -0.088` on renders that carry no distortion at all, and the sweep
+    produced 2,107 points where the known-pose route produced 292,640.
+
+    So the extra parameters are checked rather than dropped. A fitted distortion is a signal the
+    intrinsics are badly constrained (COLMAP absorbs focal-length error into k1), which is worth
+    stopping for on its own.
+    """
     model = camera.model.name if hasattr(camera.model, "name") else str(camera.model)
     p = list(camera.params)
-    if model in ("SIMPLE_PINHOLE", "SIMPLE_RADIAL", "RADIAL"):
-        f, cx, cy = p[0], p[1], p[2]
-        fx = fy = f
-    elif model in ("PINHOLE", "OPENCV", "FULL_OPENCV", "OPENCV_FISHEYE"):
+    if model == "SIMPLE_PINHOLE":
+        fx = fy = p[0]
+        cx, cy = p[1], p[2]
+        extra: list[float] = []
+    elif model in ("SIMPLE_RADIAL", "RADIAL"):
+        fx = fy = p[0]
+        cx, cy = p[1], p[2]
+        extra = p[3:]
+    elif model == "PINHOLE":
         fx, fy, cx, cy = p[0], p[1], p[2], p[3]
+        extra = []
+    elif model in ("OPENCV", "FULL_OPENCV", "OPENCV_FISHEYE"):
+        fx, fy, cx, cy = p[0], p[1], p[2], p[3]
+        extra = p[4:]
     else:
         raise SystemExit(f"unhandled COLMAP camera model {model!r}; re-run with a pinhole model")
+
+    worst = max((abs(v) for v in extra), default=0.0)
+    if worst > MAX_IGNORED_DISTORTION:
+        raise SystemExit(
+            f"COLMAP fitted camera model {model!r} with distortion coefficients {extra}, the largest "
+            f"|{worst:.4f}| exceeding the {MAX_IGNORED_DISTORTION} this pipeline can ignore. Every "
+            f"stage downstream projects through K alone, so honouring only K would reproject every "
+            f"pixel slightly wrong and the depth sweep would return almost nothing.\n"
+            f"Fix by constraining the intrinsics instead of letting them absorb error: pass "
+            f"--intrinsics 'f,cx,cy' (from EXIF, or the lens spec) so the focal length is not free.")
     return np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
 
 
 def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_RADIAL",
-                   reuse: bool = True) -> list[Camera]:
+                   reuse: bool = True, intrinsics: tuple[float, float, float] | None = None
+                   ) -> list[Camera]:
     """Run COLMAP feature extraction, matching and incremental mapping. Returns registered cameras.
 
     Views COLMAP fails to register are DROPPED and reported, never silently given a made-up pose: an
     unregistered image is one the geometry could not explain, and inventing a pose for it would put
     its pixels somewhere wrong in every later stage.
+
+    `intrinsics=(f, cx, cy)` pins the camera instead of letting bundle adjustment solve for it, and on a
+    weakly-constrained scene that is the difference between a usable reconstruction and a warped one.
+    Left free on the reference fixture, COLMAP settled on a focal length of 567.7 against a true 892.8
+    -- 36% low -- and absorbed the mismatch into radial distortion. All 24 views still "registered",
+    but their recovered centres sat a median 526 mm off the truth on a 1544 mm ring. Registration
+    succeeding is not the same as the geometry being right, and only a comparison against known poses
+    shows the difference. Supply the focal length from EXIF or the lens spec whenever it is known.
     """
     try:
         import pycolmap
@@ -79,7 +122,13 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
         # there is no `sift_options=` parameter in pycolmap 4.x. Both were assumed once and neither
         # exists -- which is why this path is exercised by an actual run rather than only read.
         reader = pycolmap.ImageReaderOptions()
-        reader.camera_model = camera_model
+        reader.camera_model = "PINHOLE" if intrinsics else camera_model
+        if intrinsics:
+            f, cx, cy = intrinsics
+            # PINHOLE takes fx, fy, cx, cy and carries no distortion term -- so nothing can be fitted
+            # that this pipeline would then have to discard.
+            reader.camera_params = f"{f},{f},{cx},{cy}"
+            print(f"  intrinsics pinned: f={f:.2f} cx={cx:.1f} cy={cy:.1f} (PINHOLE, no distortion)")
         # PASS THE FILE LIST, NOT JUST THE DIRECTORY. extract_features globs the directory when
         # image_names is empty, which silently swept up the 24 `<view>_mask.png` files a fixture writes
         # alongside its views: COLMAP indexed 48 images, half of them black-and-white silhouettes
@@ -96,7 +145,13 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
     existing = [d for d in sorted(sparse.iterdir()) if d.is_dir()] if sparse.exists() else []
     if not existing:
         print("  COLMAP: incremental mapping")
-        maps = pycolmap.incremental_mapping(database, image_dir, sparse)
+        options = pycolmap.IncrementalPipelineOptions()
+        if intrinsics:
+            # Pinning the intrinsics is pointless if bundle adjustment is then free to move them.
+            options.ba_refine_focal_length = False
+            options.ba_refine_principal_point = False
+            options.ba_refine_extra_params = False
+        maps = pycolmap.incremental_mapping(database, image_dir, sparse, options=options)
         if not maps:
             raise SystemExit("COLMAP registered no reconstruction; the views may not overlap enough")
         reconstruction = maps[0] if isinstance(maps, list) else maps[0]

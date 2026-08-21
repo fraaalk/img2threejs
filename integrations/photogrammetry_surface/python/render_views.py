@@ -57,10 +57,17 @@ def backdrop_mesh(centre: np.ndarray, radius: float, seed: int = 0,
     # 197 keypoints per image, one view as low as 7) and COLMAP still registered only 7 of 24 views.
     # Bilinear octaves give blobs at several scales, which is what a real textured surface presents and
     # what the detector is built to find.
-    size = 1024
+    # Large enough to stay sharp WITHOUT tiling. Tiling was tried and it corrupts the reconstruction:
+    # a repeating backdrop gives SIFT many identical-looking patches, matches become ambiguous, and
+    # COLMAP builds a confidently wrong camera configuration. The signature is unmistakable once you
+    # compare against known poses -- consecutive view angles came out in a repeating 28.0/56.2/28.2
+    # pattern where every one should be 30.0, periodic with the tiling -- and it is completely invisible
+    # if you only look at "24/24 registered". Unique texture at high resolution gives sharp features
+    # with no ambiguity.
+    size = 4096
     texture = np.zeros((size, size), dtype=np.float64)
     amplitude = 1.0
-    for octave in range(7):
+    for octave in range(9):
         n = 4 * 2 ** octave
         coarse = rng.random((n, n)) * 255.0
         with Image.fromarray(coarse.astype(np.uint8)) as handle:
@@ -83,13 +90,9 @@ def backdrop_mesh(centre: np.ndarray, radius: float, seed: int = 0,
     ], axis=-1).reshape(-1, 3)
     normals = centre - points
     normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
-    # Tiled, and the sampler must be told to WRAP (render(..., wrap_texture=True)). Two earlier
-    # attempts got this wrong in opposite directions: tiling with a clamping sampler collapsed the
-    # backdrop onto one edge texel and rendered flat grey, and then dropping the tiling stretched one
-    # 1024-square noise field over the whole sphere so the visible part was magnified into soft blur --
-    # low contrast, few corners, and the feature count barely moved. Tiling plus wrapping keeps the
-    # texture at its native resolution, which is what puts sharp blobs in frame for the detector.
-    uvs = np.stack([uu, vv], axis=-1).reshape(-1, 2) * 8.0
+    # NOT tiled -- see the note on `size` above for why tiling corrupts the reconstruction. Sharpness
+    # comes from the texture being large, not from repeating a small one.
+    uvs = np.stack([uu, vv], axis=-1).reshape(-1, 2)
 
     tris = []
     for r in range(rings - 1):
