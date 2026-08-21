@@ -32,6 +32,34 @@ unregistered image is one the geometry could not explain; placing it anyway puts
 wrong in every later stage, and the resulting surface defect looks like an MVS problem rather than a
 pose problem.
 
+### What registration actually depends on
+
+This stage is where the fixture had to change to test anything, and the numbers are worth keeping
+because they are the same numbers that decide whether a real capture works:
+
+| Fixture | keypoints/view (median) | verified pairs | registered |
+|---|---|---|---|
+| black background | 414 | 68 / 276 | 3 / 24 |
+| + mask files wrongly indexed as views | 406 | 68 / 276 | 3 / 24 |
+| + blocky-noise backdrop | 197 | 69 / 276 | 7 / 24 |
+| + smooth but blurry backdrop | 175 | 68 / 276 | 3 / 24 |
+| **+ sharp tiled backdrop** | **861** | **276 / 276** | **24 / 24** |
+
+Three lessons, each of which cost a run to learn:
+
+- **A featureless background makes SfM impossible, not merely harder.** MVS wants the subject cleanly
+  separated and a black backdrop gives that for free; SfM recovers pose from image features and a black
+  backdrop gives it none. The two halves of the pipeline want opposite things from the background, and
+  the resolution is a textured background plus explicit masks.
+- **Texture has to be the right kind.** Blocky noise is worse than useless: its only structure is
+  axis-aligned straight edges, and SIFT deliberately rejects edge responses in favour of blob-like
+  extrema. Blurry noise fails for the opposite reason — no structure at any scale the detector keys on.
+  Only sharp, multi-scale, blob-rich texture moved the count.
+- **`extract_features` globs the directory unless told otherwise.** The fixture writes
+  `<view>_mask.png` next to each view, and COLMAP indexed all 48 files, tried to register 24
+  silhouettes, and reported nothing unusual. Passing `image_names` explicitly is the fix; filtering
+  only the list used for the printed count is not.
+
 **Scale is arbitrary here and that has consequences.** SfM from images cannot recover absolute size.
 Until the scale is set from one known real dimension, a `--cell 0.0015` is not 1.5 mm of subject — it
 is 1.5 units of an arbitrary reconstruction. Every millimetre figure downstream inherits that.

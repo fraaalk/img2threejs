@@ -141,25 +141,11 @@ def main() -> int:
 
     image_dir = Path(args.images)
     scale_applied = None
+    sfm_work = None
     if args.sfm:
-        from sfm_poses import estimate_poses, rescale, sparse_points
-        work = Path(args.sfm_work) if args.sfm_work else image_dir / "_sfm"
-        cams = estimate_poses(image_dir, work)
-        if args.scale_longest:
-            # Scale the CAMERAS, not the output cloud. Everything downstream -- the depth range, the
-            # sweep, the fusion voxel, the cell size -- is derived from camera geometry, so fixing the
-            # scale here puts the whole pipeline in metres. Scaling only the final cloud would leave
-            # every intermediate in SfM units and the millimetre-denominated parameters meaningless.
-            # x_cam = R x_world + t, so scaling world by s requires t scaled by s too.
-            factor = rescale(cams, sparse_points(work), args.scale_longest)
-            for cam in cams:
-                cam.t = cam.t * factor
-            scale_applied = factor
-            print(f"  scale set from --scale-longest {args.scale_longest} m: factor {factor:.6f}")
-            print(f"  the reconstruction is now metric, so millimetre figures below are real")
-        else:
-            print("  NOTE: no --scale-longest given, so this reconstruction is NOT metric. Every "
-                  "millimetre figure below, and --cell itself, is in arbitrary SfM units.")
+        from sfm_poses import estimate_poses
+        sfm_work = Path(args.sfm_work) if args.sfm_work else image_dir / "_sfm"
+        cams = estimate_poses(image_dir, sfm_work)
     else:
         if not args.cameras:
             raise SystemExit("pass --cameras cameras.json, or --sfm to estimate poses from the images")
@@ -170,7 +156,28 @@ def main() -> int:
         cams = [cams[int(i * step)] for i in range(args.max_views)]
         print(f"--max-views {args.max_views}: using a {len(cams)}-view subset")
 
+    # Images and masks are loaded BEFORE scaling, because setting the scale needs the masks: the
+    # subject has to be told apart from the background it was reconstructed alongside.
     greys, masks = load_images(image_dir, cams)
+
+    if args.sfm:
+        if args.scale_longest:
+            from sfm_poses import rescale, sparse_points
+            # Scale the CAMERAS, not the output cloud. Everything downstream -- the depth range, the
+            # sweep, the fusion voxel, the cell size -- is derived from camera geometry, so fixing the
+            # scale here puts the whole pipeline in metres. Scaling only the final cloud would leave
+            # every intermediate in SfM units and the millimetre-denominated parameters meaningless.
+            # x_cam = R x_world + t, so scaling world by s requires t scaled by s too.
+            factor = rescale(cams, sparse_points(sfm_work), args.scale_longest, masks=masks)
+            for cam in cams:
+                cam.t = cam.t * factor
+            scale_applied = factor
+            print(f"  scale set from --scale-longest {args.scale_longest} m: factor {factor:.6f}")
+            print("  the reconstruction is now metric, so millimetre figures below are real")
+        else:
+            print("  NOTE: no --scale-longest given, so this reconstruction is NOT metric. Every "
+                  "millimetre figure below, and --cell itself, is in arbitrary SfM units.")
+
     near, far, target, radius, spread = depth_range(cams)
     print(f"{len(cams)} views at {cams[0].width}x{cams[0].height}")
     print(f"  axes converge at {np.round(target, 4).tolist()}, mean camera distance {radius:.4f} "

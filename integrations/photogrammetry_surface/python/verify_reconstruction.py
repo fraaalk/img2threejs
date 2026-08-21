@@ -110,9 +110,23 @@ def align_similarity(source: np.ndarray, target: np.ndarray, iterations: int = 3
     tree = cKDTree(target)
 
     def principal(points: np.ndarray) -> np.ndarray:
+        """Right-handed principal-axis frame, descending variance.
+
+        FORCING det=+1 HERE IS LOAD-BEARING. `eigh` returns an orthonormal basis with no guarantee of
+        handedness, and reversing the column order flips it again. If the source and target frames come
+        out with opposite handedness, every one of the four even-parity flips tried below inherits a
+        determinant of -1, every candidate is rejected as a reflection, and the function silently falls
+        through to the identity -- reporting "factor 1.0000" and aligning nothing, which reads as a
+        catastrophically bad reconstruction rather than a failed initialisation. Measured: the SfM cloud
+        gave det -1 against the truth mesh's +1, so this path was hit every time.
+        """
         centred = points - points.mean(axis=0)
         _, vecs = np.linalg.eigh(centred.T @ centred / len(points))
-        return vecs[:, ::-1]                      # descending variance
+        vecs = vecs[:, ::-1]                      # descending variance
+        if np.linalg.det(vecs) < 0:
+            vecs = vecs.copy()
+            vecs[:, 2] *= -1.0
+        return vecs
 
     src_axes = principal(src_s)
     dst_axes = principal(target)

@@ -152,18 +152,89 @@ def sparse_points(work_dir: Path) -> np.ndarray:
     return np.array([p.xyz for p in reconstruction.points3D.values()], dtype=np.float64)
 
 
-def rescale(cams: list[Camera], points: np.ndarray, longest_edge_metres: float) -> float:
-    """Scale factor putting the reconstruction into metres, from one known real dimension.
+def rescale(cams: list[Camera], points: np.ndarray, longest_edge_metres: float,
+            masks: list[np.ndarray] | None = None, min_consistency: float = 0.7,
+            min_seen: int = 3) -> float:
+    """Scale factor putting the reconstruction into metres, from the SUBJECT's known real dimension.
 
-    Applied to the CLOUD, not the cameras, by the caller -- and returned rather than applied here so
-    the number appears in the run report. A reconstruction whose scale nobody set is not metric, and
-    every millimetre figure computed from it is decoration.
+    MEASURING THE WHOLE SPARSE CLOUD IS WRONG, and wrong by an order of magnitude in the capture setup
+    this pipeline recommends. SfM reconstructs everything it can see, and a textured background -- the
+    thing that makes pose estimation work at all -- dominates the point count and the extent. Measured
+    on the reference fixture: the full sparse cloud spanned 39.9 units against a subject of about 4, so
+    dividing the subject's real size by the full extent produced a factor ten times too small and
+    scaled the entire reconstruction to a tenth of life size. Everything downstream stayed
+    self-consistent and every millimetre figure was silently a tenth of its true value.
+
+    So the subject has to be isolated first, and MASK MEMBERSHIP ALONE DOES NOT DO IT. A background
+    point directly behind the subject projects inside the subject's silhouette, so "inside the mask in
+    a couple of views" keeps it: filtering that way kept 867 of 1195 points and left the extent at
+    40.2 units, essentially unfiltered.
+
+    What separates them is CONSISTENCY. A real subject point is inside the silhouette in nearly every
+    view that sees it; a background point only lands inside by coincidence, from a few directions. So
+    the test is the FRACTION of observing views that place the point inside the mask, and the measured
+    behaviour is a cliff rather than a gradient:
+
+        fraction >= 0.30  ->  678 points, extent 40.5     (still the backdrop)
+        fraction >= 0.50  ->  595 points, extent 37.6     (still the backdrop)
+        fraction >= 0.70  ->  514 points, extent  3.99    <- the subject
+        fraction >= 0.85  ->  435 points, extent  3.95
+        fraction >= 1.00  ->  203 points, extent  4.00
+
+    The plateau from 0.70 upward is why 0.7 is a safe default: the answer does not depend delicately on
+    the threshold. Without masks there is no way to tell subject from background at all, and this
+    refuses rather than guessing -- a silent order-of-magnitude scale error is worse than a stop.
     """
     if len(points) == 0:
         raise SystemExit("no sparse points to measure; cannot set scale")
-    lo = np.percentile(points, 1, axis=0)
-    hi = np.percentile(points, 99, axis=0)
+
+    if masks is None:
+        raise SystemExit(
+            "--scale-longest needs per-view subject masks to tell the subject apart from the "
+            "background. SfM reconstructs the background too, and on the reference fixture it "
+            "dominated the extent by 10x, which would scale the whole reconstruction to a tenth of "
+            "life size. Supply <view>_mask.png files, or drop --scale-longest and accept a "
+            "non-metric reconstruction.")
+
+    inside = np.zeros(len(points), dtype=np.int32)
+    seen = np.zeros(len(points), dtype=np.int32)
+    for cam, mask in zip(cams, masks):
+        uv, z = cam.project(points)
+        u = np.round(uv[:, 0] - 0.5).astype(np.int64)
+        v = np.round(uv[:, 1] - 0.5).astype(np.int64)
+        visible = (z > 1e-9) & (u >= 0) & (u < cam.width) & (v >= 0) & (v < cam.height)
+        seen += visible
+        if visible.any():
+            hit = np.zeros(len(points), dtype=bool)
+            idx = np.nonzero(visible)[0]
+            hit[idx] = mask[v[idx], u[idx]]
+            inside += hit
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        consistency = inside / np.maximum(seen, 1)
+    subject = (consistency >= min_consistency) & (seen >= min_seen)
+    if subject.sum() < 8:
+        raise SystemExit(
+            f"only {int(subject.sum())} sparse point(s) sit inside the subject masks in "
+            f"{min_consistency:.0%}+ of the views that see them; cannot measure the subject's extent. "
+            f"Check that the masks correspond to the images and actually mark the subject.")
+
+    lo = np.percentile(points[subject], 1, axis=0)
+    hi = np.percentile(points[subject], 99, axis=0)
     longest = float(np.max(hi - lo))
     if longest <= 0:
-        raise SystemExit("degenerate sparse cloud; cannot set scale")
+        raise SystemExit("degenerate subject point set; cannot set scale")
+
+    # Report the alternative so a wrong answer is visible rather than silent: if these two are close,
+    # the masks are not separating anything and the scale is probably measuring the background.
+    all_lo = np.percentile(points, 1, axis=0)
+    all_hi = np.percentile(points, 99, axis=0)
+    all_longest = float(np.max(all_hi - all_lo))
+    print(f"  scale from {int(subject.sum())}/{len(points)} sparse points that are inside the subject "
+          f"mask in >={min_consistency:.0%} of views")
+    print(f"    subject extent {longest:.3f} SfM units vs whole-scene {all_longest:.3f}")
+    if all_longest > 0 and longest / all_longest > 0.8:
+        print(f"    WARNING: the subject spans {longest / all_longest:.0%} of the whole reconstruction. "
+              f"Either the subject really does fill the scene, or the masks are not isolating it and "
+              f"this scale is measuring the background.")
     return longest_edge_metres / longest
