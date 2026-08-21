@@ -83,7 +83,9 @@ Before any factory edit:
 2. Author and validate one shared `render-profile.v2` with
    `forge/stage4_review/validate_render_profile.py`. Both GLB and procedural routes must use
    the same output color space, linear working space, tone mapping/exposure, PMREM environment,
-   viewport/DPR, camera, background and lighting settings.
+   viewport/DPR, camera, background and lighting settings. Region IDs are subject-specific, never
+   inherited from the example profile; declare the required set in
+   `extensions.requiredSemanticRegions` so omission is a hard validation error.
 3. Capture six passes for every admitted view: `beauty`, `alpha-silhouette`, `semantic-id`,
    `depth`, `normal`, and `roughness-material-id`. Use
    `forge/stage4_review/compare_region_passes.py` for deterministic global/per-region evidence;

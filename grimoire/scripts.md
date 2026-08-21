@@ -80,6 +80,31 @@ future `--pass-id` fails until earlier passes are reviewed `continue`. Output ex
 `root.userData.sculptRuntime` (nodes/meshes/sockets/colliders/destructionGroups) — hand-refine it.
 `--allow-nonstrict` is reserved for legacy test fixtures and must not be used for production output.
 
+### Executed geometry gates before browser capture
+
+After generation, execute the factory without a renderer and inspect
+`root.userData.sculptRuntime`; do this before opening the browser. For multipart characters, the
+pre-browser report must cover every named spec component and measure, where applicable:
+
+- left/right reflection from world-space bounds, plus thumb/index chirality for hands;
+- ordered garment-shell intervals so a waist layer cannot sink into the layer beneath it;
+- every `geometry.userData.standProud.unresolved` count (zero is the exact pass condition);
+- engine-visible `material.userData.referenceMaterialId`, not an ignored authoring field;
+- garment boundary positions against the relevant articulation joints, not all unrelated bones.
+
+Global width/height/depth ratios may be recorded against a GLB baseline, but remain diagnostic and
+must declare themselves uncalibrated until paired multi-angle silhouette controls establish an
+acceptance threshold. Do not turn an arbitrary ratio tolerance into a gate. Every exact gate added
+for a showcase needs a passing fixture and a mutation that makes it fail (missing mesh, same-side
+reflection, sunk layer, swapped thumb, unresolved proud vertex, missing material ID, or boundary
+moved onto its joint). A clean TypeScript build is not executed-geometry evidence.
+
+Ordinary primitives stay on their authored geometry path: generated factories do not invent an
+attachment variable for them, and the shared endpoint branches retain the declared
+`AttachmentEndpoint | null` helper return type rather than a literal null that strict TypeScript
+narrows to `never`. Verify that negative-control path with a spec containing no attachment-derived
+primitives before accepting the showcase build.
+
 ## Forge subdivision runtime validation
 Runtime subdivision tests compile generated TypeScript against `img2threejs-showcase`. Set
 `IMG2THREEJS_SHOWCASE_ROOT` to that checkout. Without it, runtime-only cases skip locally with an
@@ -183,7 +208,9 @@ materialSurface, lightingCamera`. Records one self-correction entry into `review
 
 `stage4_review/validate_render_profile.py docs/specs/render-profile.v2.example.json`
 validates the shared browser renderer/camera/environment contract. Use it when initializing
-the GLB-mediated route:
+the GLB-mediated route. `regions` must name the actual subject regions; list the mandatory subset
+under `extensions.requiredSemanticRegions`. The validator rejects missing declared regions and does
+not impose the example subject's names on another reconstruction:
 
 `stage4_review/render_bridge.py init --reference-glb GLB --render-profile PROFILE --runtime-url URL --out render-manifest.json`
 

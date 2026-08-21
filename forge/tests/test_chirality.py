@@ -38,6 +38,7 @@ from chirality import (  # noqa: E402
     sagittal_symmetry_error,
     side_of,
 )
+import validate_sculpt_spec  # noqa: E402
 
 
 class TheConvention(unittest.TestCase):
@@ -248,6 +249,55 @@ class WholeFigureSanity(unittest.TestCase):
 
     def test_no_points_does_not_raise(self) -> None:
         self.assertEqual(sagittal_symmetry_error([]), 0.0)
+
+
+
+class NestedPairSideNaming(unittest.TestCase):
+    """The side-naming warning reads WORLD x, so a nested pair member is judged by where it is.
+
+    A toe inside a left paw legitimately carries a negative LOCAL x while sitting on the
+    character's left. Reading the local value flagged every inboard toe of a correctly mirrored
+    pair, and the only way to silence it would have been to stop mirroring them.
+    """
+
+    @staticmethod
+    def _spec(toe_offset_left: float, toe_offset_right: float):
+        def part(component_id, parent, x):
+            return {
+                "id": component_id,
+                "name": component_id,
+                "level": "meso",
+                "role": "paw",
+                "primitive": "ellipsoid",
+                "topologyClass": "continuous-sculpt",
+                "topologyRationale": "test",
+                "parent": parent,
+                "dimensions": {"width": 0.1, "height": 0.1, "depth": 0.1, "units": "relative"},
+                "transform": {"position": [x, 0.0, 0.0], "rotation": [0, 0, 0]},
+            }
+
+        return {
+            "componentTree": [
+                part("paw-l", None, 0.12),
+                part("paw-r", None, -0.12),
+                part("toe-0-l", "paw-l", toe_offset_left),
+                part("toe-0-r", "paw-r", toe_offset_right),
+            ]
+        }
+
+    def test_a_correctly_mirrored_inboard_toe_is_not_flagged(self):
+        errors, warnings = [], []
+        validate_sculpt_spec.validate_chirality(self._spec(-0.04, 0.04), errors, warnings)
+        self.assertEqual(errors, [])
+        self.assertEqual([w for w in warnings if "named for the character" in w], [])
+
+    def test_a_toe_that_really_crosses_the_midline_is_still_flagged(self):
+        """Negative control: the world-space read must not simply stop catching the defect."""
+        errors, warnings = [], []
+        validate_sculpt_spec.validate_chirality(self._spec(-0.30, 0.30), errors, warnings)
+        flagged = [w for w in warnings if "named for the character" in w]
+        self.assertEqual(len(flagged), 2, warnings)
+        self.assertIn("world x", flagged[0])
 
 
 if __name__ == "__main__":
