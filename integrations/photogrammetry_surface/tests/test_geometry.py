@@ -211,3 +211,111 @@ class DenseStereo(GeometryCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SimilarityAlignment(GeometryCase):
+    """Regression cover for a silent no-op: opposite-handed principal frames rejected every candidate."""
+
+    def test_recovers_a_known_similarity_across_many_orientations(self) -> None:
+        out = self.run_snippet("""
+            from verify_reconstruction import align_similarity
+            from scipy.spatial import cKDTree
+
+            def random_rotation(rng):
+                q = rng.normal(size=4); q /= np.linalg.norm(q)
+                w, x, y, z = q
+                return np.array([
+                    [1-2*(y*y+z*z), 2*(x*y-w*z),   2*(x*z+w*y)],
+                    [2*(x*y+w*z),   1-2*(x*x+z*z), 2*(y*z-w*x)],
+                    [2*(x*z-w*y),   2*(y*z+w*x),   1-2*(x*x+y*y)]])
+
+            worst = 0.0
+            failures = 0
+            for seed in range(8):
+                rng = np.random.default_rng(seed)
+                # An asymmetric blob, so the principal axes are well separated and the correct
+                # alignment is unique rather than degenerate.
+                target = rng.normal(size=(4000, 3)) * np.array([1.0, 0.55, 0.3])
+                R = random_rotation(rng)
+                scale = 0.15 + rng.random() * 3.0
+                offset = rng.normal(size=3) * 5.0
+                source = scale * (target @ R.T) + offset
+
+                s, Rf, t = align_similarity(source, target)
+                moved = s * (source @ Rf.T) + t
+                residual = float(np.median(cKDTree(target).query(moved, k=1, workers=-1)[0]))
+                span = float(np.linalg.norm(target.max(0) - target.min(0)))
+                worst = max(worst, residual / span)
+                if residual / span > 0.02:
+                    failures += 1
+            print('worst_relative_residual', worst)
+            print('failures', failures)
+        """)
+        v = dict(line.split() for line in out.strip().splitlines())
+        self.assertEqual(int(v["failures"]), 0,
+                         f"alignment failed on {v['failures']}/8 orientations; before the handedness "
+                         f"fix roughly half fell through to the identity")
+        self.assertLess(float(v["worst_relative_residual"]), 0.02)
+
+
+class SubjectScale(GeometryCase):
+    """Regression cover for a 10x silent scale error: the background dominated the measured extent."""
+
+    def test_scale_comes_from_the_subject_not_the_background(self) -> None:
+        out = self.run_snippet("""
+            from cameras import Camera, intrinsics, look_at
+            from sfm_poses import rescale
+
+            rng = np.random.default_rng(0)
+            SUBJECT_R, BACKGROUND_R, DISTANCE = 0.5, 5.0, 12.0
+            W = H = 256
+            K = intrinsics(W, H, 40.0)
+
+            def shell(radius, n):
+                v = rng.normal(size=(n, 3))
+                return v / np.linalg.norm(v, axis=1, keepdims=True) * radius
+
+            subject = shell(SUBJECT_R, 400)
+            background = shell(BACKGROUND_R, 1600)
+            points = np.vstack([subject, background])
+
+            cams, masks = [], []
+            for i in range(8):
+                a = 2 * np.pi * i / 8
+                eye = np.array([np.sin(a), 0.2, np.cos(a)]) * DISTANCE
+                R, t = look_at(eye, [0.0, 0.0, 0.0])
+                cam = Camera(K, R, t, W, H, f'v{i}')
+                cams.append(cam)
+                # A sphere at the look-at point projects to a disc about the principal point. Using the
+                # analytic silhouette keeps the test about rescale, not about a rasteriser.
+                uu, vv = np.meshgrid(np.arange(W) + 0.5, np.arange(H) + 0.5, indexing='xy')
+                r_px = K[0, 0] * SUBJECT_R / DISTANCE * 1.05
+                masks.append(np.hypot(uu - W / 2.0, vv - H / 2.0) <= r_px)
+
+            true_extent = 2 * SUBJECT_R
+            factor = rescale(cams, points, true_extent, masks=masks)
+            # The factor should map SfM units to metres such that the SUBJECT measures true_extent.
+            # Here SfM units already are metres, so the correct factor is ~1.0. Measuring the whole
+            # scene instead would give ~ (2*SUBJECT_R)/(2*BACKGROUND_R) = 0.1.
+            print('factor', factor)
+        """)
+        # rescale() prints diagnostics, so pick the tagged line rather than a positional token.
+        line = next(l for l in out.strip().splitlines() if l.startswith("factor "))
+        factor = float(line.split()[1])
+        self.assertAlmostEqual(factor, 1.0, delta=0.15,
+                               msg=f"factor {factor:.4f}; ~0.1 means the background extent was "
+                                   f"measured instead of the subject's")
+
+    def test_rescale_refuses_without_masks(self) -> None:
+        out = self.run_snippet("""
+            from sfm_poses import rescale
+            rng = np.random.default_rng(0)
+            try:
+                rescale([], rng.normal(size=(100, 3)), 0.25, masks=None)
+                print('refused', 'no')
+            except SystemExit:
+                print('refused', 'yes')
+        """)
+        self.assertIn("refused yes", out,
+                      "without masks the subject cannot be isolated, so this must stop rather than "
+                      "silently measure the background")
