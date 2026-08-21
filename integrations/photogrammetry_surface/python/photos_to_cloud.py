@@ -73,12 +73,14 @@ def load_images(image_dir: Path, cams: list[Camera]) -> tuple[list[np.ndarray], 
     return greys, masks
 
 
-def depth_range(cams: list[Camera], masks: list[np.ndarray]) -> tuple[float, float]:
+def depth_range(cams: list[Camera]) -> tuple[float, float, np.ndarray, float, float]:
     """Depth bounds from where the cameras' own optical axes converge.
 
-    The subject sits near the point the views look at; its extent is bounded by how far apart the
-    cameras are. Deriving the range costs nothing and removes a magic number that would silently
-    clip a larger subject.
+    The subject sits near the point the views look at, and its extent is bounded by how far the
+    cameras are from it. Deriving the range costs nothing and removes a magic number that would
+    silently clip a larger subject.
+
+    Returns `(near, far, convergence_point, mean_radius, radius_spread)`.
     """
     centres = np.array([c.centre for c in cams])
     forwards = np.array([c.forward for c in cams])
@@ -93,8 +95,10 @@ def depth_range(cams: list[Camera], masks: list[np.ndarray]) -> tuple[float, flo
     distances = np.linalg.norm(centres - target, axis=1)
     radius = float(distances.mean())
     spread = float(np.linalg.norm(centres - target, axis=1).std())
-    near = max(radius * 0.35, radius - 0.75 * radius)
-    far = radius + 0.75 * radius
+    # A subject is assumed to sit within 65% of the camera distance either side of the convergence
+    # point. Wider than any sane framing, and the sweep spends planes rather than missing surface.
+    near = radius * 0.35
+    far = radius * 1.75
     return near, far, target, radius, spread
 
 
@@ -120,6 +124,13 @@ def main() -> int:
                     help="neighbours in the local plane fit that sets normal direction")
     ap.add_argument("--min-planarity", type=float, default=0.0,
                     help="drop points whose neighbourhood is a noise ball rather than a plane")
+    ap.add_argument("--outlier-sigma", type=float, default=1.0,
+                    help="drop points whose mean neighbour gap exceeds mean + sigma*std; 0 disables")
+    ap.add_argument("--mls-k", type=int, default=24,
+                    help="neighbours in the MLS plane fit that denoises the cloud")
+    ap.add_argument("--mls-iterations", type=int, default=1,
+                    help="MLS passes; 0 disables. One quadric pass beats two on both noise and "
+                         "curvature bias -- see fuse_cloud.mls_project")
     ap.add_argument("--max-views", type=int, default=0, help="0 = all; otherwise cap for a quick run")
     ap.add_argument("--report", default=None, help="write a JSON run report here")
     args = ap.parse_args()
@@ -140,7 +151,7 @@ def main() -> int:
         print(f"--max-views {args.max_views}: using a {len(cams)}-view subset")
 
     greys, masks = load_images(image_dir, cams)
-    near, far, target, radius, spread = depth_range(cams, masks)
+    near, far, target, radius, spread = depth_range(cams)
     print(f"{len(cams)} views at {cams[0].width}x{cams[0].height}")
     print(f"  axes converge at {np.round(target, 4).tolist()}, mean camera distance {radius:.4f} "
           f"(spread {spread:.4f})")
@@ -186,7 +197,9 @@ def main() -> int:
     print(f"\nfusing (voxel {voxel * 1000:.2f} mm = half the {args.cell * 1000:.2f} mm cell)")
     fused = fuse(cams, depths, [k if k is not None else None for k in keeps], confs,
                  voxel=voxel, min_views_per_voxel=args.min_views_per_voxel,
-                 pca_k=args.pca_k, min_planarity=args.min_planarity)
+                 pca_k=args.pca_k, min_planarity=args.min_planarity,
+                 outlier_sigma=args.outlier_sigma, mls_k=args.mls_k,
+                 mls_iterations=args.mls_iterations)
     P, N = fused["P"], fused["N"]
     if len(P) == 0:
         raise SystemExit("fusion produced no points; loosen --min-confidence or --min-agreeing")
@@ -195,7 +208,10 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, P=P.astype(np.float64), N=N.astype(np.float64))
     extent = P.max(axis=0) - P.min(axis=0)
-    print(f"  {fused['rawCount']:,} raw points -> {len(P):,} after voxel averaging")
+    print(f"  {fused['rawCount']:,} raw -> {fused['afterVoxel']:,} voxel-averaged -> "
+          f"{fused['afterOutliers']:,} after outlier removal -> {len(P):,} final")
+    if args.mls_iterations:
+        print(f"  MLS: {args.mls_iterations} pass(es) at k={args.mls_k}")
     print(f"  extent {np.round(extent, 4).tolist()} m")
     print(f"\nwrote {out}")
     print(f"total {time.time() - started:.1f}s")

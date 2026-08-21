@@ -70,15 +70,59 @@ depth there, back-project, and require the round trip to land within a tolerance
 Measured on the 512px fixture: this discards **45–58% of the depths that passed the confidence
 threshold**, per view. That is the filter doing its job, not a defect.
 
-## Stage 4 — Fusion and normals
+## Stage 4 — Fusion, denoising and normals
 
-`python/fuse_cloud.py`. Back-project surviving depths, voxel-average at half the reconstruction cell
-(averaging cancels independent per-view noise, which the splat would otherwise smear into the field),
-then estimate normals.
+`python/fuse_cloud.py`, in this order, and the order is load-bearing:
+
+1. **Back-project and voxel-average** at half the reconstruction cell. Every surface patch is seen by
+   several views, so averaging within a voxel cancels independent per-view noise — noise the splat
+   would otherwise smear straight into the field.
+2. **Drop outliers** (`--outlier-sigma`, default 1.0): points whose mean gap to their 16 nearest
+   neighbours exceeds the cloud's own mean + σ. An MVS outlier is not a point misplaced *on* the
+   surface, it is one floating off it, and those are precisely the points a contour then wraps an
+   isolated speck of shell around. Before MLS, so an outlier cannot drag a plane fit off the surface.
+3. **MLS projection** (`--mls-iterations`, default 1): move each point onto its own local plane fit.
+   This is the highest-value cleanup in the module because it targets exactly the error MVS leaves —
+   noise *perpendicular* to the surface. Points move only along their local normal, so the surface is
+   denoised without being smeared sideways.
+
+   **One pass, not two.** On an analytic sphere (100 mm radius, 1 mm noise, k=24) one pass leaves
+   0.173 mm of noise and 0.11 mm of shrinkage; two passes give 0.356 mm and 0.36 mm — worse on both.
+   The second pass re-fits an already-smoothed surface, so it compounds the bias while the noise it
+   was meant to remove is already gone.
+
+   A quadratic fit was implemented to remove the residual shrinkage and **measured identically to the
+   plane** (bias −0.111 vs −0.112 mm, noise 0.173 mm both), so it was removed rather than kept. The
+   theory behind it was wrong at this neighbourhood size: the chord-versus-arc sagitta at k=24 over a
+   100 mm radius is about 0.02 mm, an order below the observed bias. The bias comes from anchoring the
+   fit at the neighbourhood mean, which on a noisy curved patch sits slightly inside the surface — and
+   a quadric through the same noisy points inherits it. Recorded here because the figure that
+   originally justified the quadric (0.38 mm) was planar MLS at *two* iterations, not one; comparing
+   against the wrong baseline is what made a pointless option look like a fix.
+4. **Estimate normals** last, on the already-flattened cloud, which gives a markedly better direction
+   than fitting to the raw one.
+
+Measured contribution of steps 2–3 on the 1024px fixture:
+
+| | points | accuracy median | accuracy <2 mm |
+|---|---|---|---|
+| voxel-averaged only | 216,210 | 1.04 mm | 95.1% |
+| + outlier removal | 202,259 | 1.03 mm | 95.7% |
+| **+ MLS ×1** | 202,259 | **0.90 mm** | **98.0%** |
+| + MLS ×2 | 202,259 | 0.86 mm | 98.3% |
+
+Note the tension in the last two rows: on this fixture two passes score slightly *better* on
+accuracy-to-truth, while on the analytic sphere two passes are clearly worse on both noise and
+shrinkage. The sphere is the controlled measurement — it separates noise from bias, which a
+distance-to-truth median cannot — so the default follows it. A 0.04 mm accuracy gain is not worth an
+uncontrolled shrinkage that lands on exactly the millimetre-scale features the reconstruction exists
+to recover.
 
 **Normals are where this pipeline nearly failed, and the fix was measured.** The splat is *oriented*:
 it accumulates `(cell − point) · normal`, so the field's sign comes entirely from the normal. A wrong
 normal does not roughen the surface, it inverts it.
+
+On the 512px fixture, where the effect is largest:
 
 | Normal source | median error | within 15° | within 30° |
 |---|---|---|---|
@@ -87,6 +131,10 @@ normal does not roughen the surface, it inverts it.
 | local PCA, k=48 | 23.6° | 28.6% | 62.5% |
 | local PCA, k=96 | 16.1° | 46.4% | 79.5% |
 | **local PCA, k=128** | **13.5°** | **55.5%** | **85.5%** |
+
+Note what `k` is really buying: with fixed point noise, a wider neighbourhood averages more of it
+away, so this column is a noise-vs-feature-size trade, not a free improvement. It is also why the
+same estimator reaches 6.2° on the 1024px fixture at a *smaller* k — less input noise to average.
 
 The depth-gradient estimate is arithmetically doomed: MVS depth carries about a millimetre of noise,
 and a central difference over two pixels spans about a millimetre of surface, so the gradient is as
@@ -106,14 +154,27 @@ pipeline received the PNGs and camera poses and nothing else.
 
 ### Cloud, against the mesh it never saw
 
-| | median | p90 | under 2 mm |
-|---|---|---|---|
-| accuracy (recon → truth) | 1.36 mm | 2.52 mm | 78.5% |
-| completeness (truth → recon) | 1.76 mm | 10.40 mm | 54.9% |
+Two fixtures, differing only in image resolution and framing. This is the single most important table
+in the document, because the difference between the rows is not a tuning choice — it is how much
+information the input images carry.
 
-Extent came out within 1% on all three axes (`[1.007, 0.989, 1.002]` of truth), so the overall scale
-and framing are right. Accuracy is decent; completeness has real gaps — p90 of 10 mm means the tail of
-the true surface has nothing reconstructed near it, concentrated where the views never saw it.
+| | 512px, subject ~25% of frame | 1024px, subject ~50% of frame |
+|---|---|---|
+| accuracy median | 1.36 mm | **1.04 mm** |
+| accuracy p90 | 2.52 mm | **1.75 mm** |
+| accuracy under 2 mm | 78.5% | **95.2%** |
+| completeness median | 1.76 mm | **1.29 mm** |
+| completeness p90 | 10.40 mm | 8.45 mm |
+| **normal error median** | 13.5° | **6.2°** |
+| **normals within 15°** | 55.5% | **85.6%** |
+
+Extent came out within 1% on all three axes at 512px (`[1.007, 0.989, 1.002]` of truth) and within 5%
+at 1024px, so scale and framing are right in both. Completeness p90 stays high in both because it is
+measuring occlusion, not precision: the tail is true surface no pair of views ever saw, and no amount
+of resolution fixes that.
+
+Adding the Stage 4 denoising to the 1024px run takes accuracy to **0.90 mm median, 98.0% within
+2 mm** (table above).
 
 ### Surface, through the shared reconstruction
 

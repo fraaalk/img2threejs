@@ -79,7 +79,6 @@ def pick_neighbours(cams: list, ref: int, count: int,
     differently in the two views and the window stops describing the same patch, so ZNCC falls apart
     on exactly the oblique surfaces that need it most.
     """
-    centre_ref = cams[ref].centre
     fwd_ref = cams[ref].forward
     scored = []
     for i, cam in enumerate(cams):

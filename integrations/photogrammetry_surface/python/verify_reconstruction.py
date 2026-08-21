@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from glb_mesh import Glb  # noqa: E402
 
 
-def nearest_distances(query: np.ndarray, target: np.ndarray, _cell: float = 0.0) -> np.ndarray:
+def nearest_distances(query: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Exact distance from each `query` point to the nearest `target` point.
 
     Exact, not approximate: an approximate nearest neighbour would report a LARGER distance than the
@@ -70,7 +70,6 @@ def main() -> int:
     ap.add_argument("--cloud", required=True)
     ap.add_argument("--glb", required=True)
     ap.add_argument("--node", type=int, required=True)
-    ap.add_argument("--grid", type=float, default=0.004, help="search-grid cell for the nearest lookup")
     ap.add_argument("--sample", type=int, default=120000,
                     help="cap on points scored per direction, sampled deterministically")
     ap.add_argument("--json", default=None)
@@ -94,8 +93,8 @@ def main() -> int:
     pi = rng.choice(len(P), min(args.sample, len(P)), replace=False)
     gi = rng.choice(len(G), min(args.sample, len(G)), replace=False)
 
-    acc = nearest_distances(P[pi], G, args.grid)
-    comp = nearest_distances(G[gi], P, args.grid)
+    acc = nearest_distances(P[pi], G)
+    comp = nearest_distances(G[gi], P)
     accuracy = summarise("accuracy (recon -> truth)", acc)
     completeness = summarise("completeness (truth -> recon)", comp)
 
