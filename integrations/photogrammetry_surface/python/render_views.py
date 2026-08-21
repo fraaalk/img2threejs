@@ -64,16 +64,26 @@ def backdrop_mesh(centre: np.ndarray, radius: float, seed: int = 0,
     # pattern where every one should be 30.0, periodic with the tiling -- and it is completely invisible
     # if you only look at "24/24 registered". Unique texture at high resolution gives sharp features
     # with no ambiguity.
+    # The SPECTRUM matters as much as the resolution, and the two requirements pull apart:
+    #   unique  -> no tiling, so one texture must cover the whole sphere (see the note above)
+    #   sharp   -> most of the contrast has to sit at the few-pixel scale, where SIFT works
+    # Starting from a low base frequency with a steep falloff satisfies the first and fails the
+    # second: the fine octaves end up at almost no amplitude, and feature counts fell to 405/view
+    # with only 10 of 24 views registering. Starting HIGH with a shallow falloff fixes it -- measured
+    # fine-detail gradient energy, base 128 / 4 octaves / 0.9 falloff carries 10x the energy of
+    # base 4 / 9 octaves / 0.65 at similar global contrast.
     size = 4096
     texture = np.zeros((size, size), dtype=np.float64)
     amplitude = 1.0
-    for octave in range(9):
-        n = 4 * 2 ** octave
+    for octave in range(4):
+        n = 128 * 2 ** octave
+        if n > size:
+            break
         coarse = rng.random((n, n)) * 255.0
         with Image.fromarray(coarse.astype(np.uint8)) as handle:
             octave_image = handle.resize((size, size), Image.BILINEAR)
         texture += amplitude * (np.asarray(octave_image, dtype=np.float64) / 255.0)
-        amplitude *= 0.65
+        amplitude *= 0.9
     texture -= texture.min()
     texture /= max(texture.max(), 1e-12)
     rgb = np.stack([texture * 215 + 20] * 3, axis=-1).astype(np.uint8)

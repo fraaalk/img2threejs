@@ -37,15 +37,56 @@ pose problem.
 This stage is where the fixture had to change to test anything, and the numbers are worth keeping
 because they are the same numbers that decide whether a real capture works:
 
-| Fixture | keypoints/view (median) | verified pairs | registered |
-|---|---|---|---|
-| black background | 414 | 68 / 276 | 3 / 24 |
-| + mask files wrongly indexed as views | 406 | 68 / 276 | 3 / 24 |
-| + blocky-noise backdrop | 197 | 69 / 276 | 7 / 24 |
-| + smooth but blurry backdrop | 175 | 68 / 276 | 3 / 24 |
-| **+ sharp tiled backdrop** | **861** | **276 / 276** | **24 / 24** |
+| Fixture | keypoints/view | verified pairs | registered | pose error vs truth |
+|---|---|---|---|---|
+| black background | 414 | 68 / 276 | 3 / 24 | — |
+| + mask files wrongly indexed as views | 406 | 68 / 276 | 3 / 24 | — |
+| + blocky-noise backdrop | 197 | 69 / 276 | 7 / 24 | — |
+| + smooth but blurry backdrop | 175 | 68 / 276 | 3 / 24 | — |
+| + sharp **tiled** backdrop | 861 | 276 / 276 | 24 / 24 | **34%** — see below |
+| + unique high-res backdrop | 405 | 68 / 276 | 10 / 24 | **0.12%** |
+| **+ retuned noise spectrum** | **4,411** | 77 / 276 | **24 / 24** | **0.01%** |
 
-Three lessons, each of which cost a run to learn:
+Read rows five and six together: the tiled fixture registered everything and got the geometry badly
+wrong, while the unique one registered less than half and got it essentially exactly right. The
+registration count and the accuracy moved in *opposite* directions, which is why the rightmost column
+exists at all.
+
+The last row gets both, and the difference is only the noise SPECTRUM. Unique texture is what makes the
+poses correct; putting the contrast at the few-pixel scale is what makes them findable. Starting the
+octaves high with a shallow falloff (base 128, 4 octaves, 0.9) rather than low with a steep one
+(base 4, 9 octaves, 0.65) carries about ten times the fine-detail gradient energy at the same global
+contrast, and took keypoints from 405 to 4,411 per view. All eleven consecutive view angles then read
+exactly 30.0.
+
+### "24/24 registered" is not the same as "the poses are right"
+
+The single most deceptive result in this whole exercise. With a **tiled** backdrop texture, COLMAP
+registered all 24 views, verified all 276 pairs, and found 33,500 inliers — every self-reported signal
+said success. Compared against the fixture's known poses, the recovered camera centres sat a median
+**526 mm off on a 1544 mm ring (34%)**, and the angle between consecutive views came out in a
+repeating `28.0 / 56.2 / 28.2` pattern where every one should have been `30.0`.
+
+Repeating texture is the cause: a tiled backdrop presents many identical-looking patches, matches
+become ambiguous, and the reconstruction settles into a confidently wrong configuration whose error is
+periodic with the tiling. Making the texture unique took the pose residual from 34% to **0.12%**
+(1.23 mm), with consecutive angles at 29.9 / 29.8 / 30.1 / 29.8.
+
+Two things follow, and the second is the general one:
+
+- **Never tile a photogrammetry target's texture.** Random-dot and speckle patterns are used in
+  practice precisely because they are unique.
+- **Registration counts, inlier counts and reprojection error cannot detect this.** They are all
+  measures of internal consistency, and an ambiguous-match reconstruction is internally consistent.
+  Only a comparison against independently known geometry exposes it — which is the entire argument for
+  keeping a fixture with ground-truth poses rather than trusting the solver's own report.
+
+An intermediate hypothesis is worth recording as *disproved*: the wrong poses came with a focal length
+36% low (567.7 against a true 892.8) and a fitted `k1 = -0.088` on distortion-free renders, which
+looked like classic focal/depth ambiguity. Pinning the intrinsics changed the pose residual from
+526 mm to 532 mm — nothing. The distortion was a symptom of the bad matches, not the cause.
+
+### Three further lessons, each of which cost a run to learn:
 
 - **A featureless background makes SfM impossible, not merely harder.** MVS wants the subject cleanly
   separated and a black backdrop gives that for free; SfM recovers pose from image features and a black

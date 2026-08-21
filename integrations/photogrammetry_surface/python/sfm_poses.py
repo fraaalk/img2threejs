@@ -81,7 +81,7 @@ def _intrinsics_from_colmap(camera) -> np.ndarray:
     return np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
 
 
-def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_RADIAL",
+def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "PINHOLE",
                    reuse: bool = True, intrinsics: tuple[float, float, float] | None = None
                    ) -> list[Camera]:
     """Run COLMAP feature extraction, matching and incremental mapping. Returns registered cameras.
@@ -89,6 +89,13 @@ def estimate_poses(image_dir: Path, work_dir: Path, camera_model: str = "SIMPLE_
     Views COLMAP fails to register are DROPPED and reported, never silently given a made-up pose: an
     unregistered image is one the geometry could not explain, and inventing a pose for it would put
     its pixels somewhere wrong in every later stage.
+
+    THE DEFAULT MODEL IS PINHOLE, deliberately, not COLMAP's own SIMPLE_RADIAL default. This pipeline
+    projects through K alone, so a model with a distortion term can only ever fit a coefficient that
+    then has to be discarded -- and `_intrinsics_from_colmap` now refuses to discard one, which would
+    turn every default run into an error. Asking for the model the pipeline can actually honour is the
+    coherent fix. On real photographs with genuine lens distortion this trades a little pose accuracy
+    for consistency; undistorting the images up front would be the better answer and is not implemented.
 
     `intrinsics=(f, cx, cy)` pins the camera instead of letting bundle adjustment solve for it, and on a
     weakly-constrained scene that is the difference between a usable reconstruction and a warped one.
