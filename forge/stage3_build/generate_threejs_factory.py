@@ -36,7 +36,8 @@ from subdivision import (
     TORUS_RADIAL_SEGMENTS,
     TORUS_TUBULAR_SEGMENTS,
 )
-from validate_sculpt_spec import VALID_PRIMITIVES, validate_spec
+from validate_sculpt_spec import ATTACHMENT_PRIMITIVES, VALID_PRIMITIVES, validate_spec
+from vertex_paint import VertexPaintError, normalize_vertex_paint
 from visual_hull import MAX_VISUAL_HULL_TRIANGLES
 
 # VALID_PRIMITIVES is re-exported rather than redefined. This module used to keep its own copy,
@@ -853,6 +854,21 @@ function sdfSample(descriptor: SdfDescriptor): SdfFunction {
 }
 
 function polygonizeSdf(descriptor: SdfDescriptor): THREE.BufferGeometry {
+  // SURFACE NETS, not a voxel shell.
+  //
+  // This used to emit one axis-aligned quad per exposed voxel face, which is a Minecraft surface:
+  // every face is axis-aligned, every edge is a 90-degree step, and the result is stair-stepped at
+  // exactly the scale of the sampling grid. For a subject whose whole identity is smooth blended
+  // organic form -- which is the only kind of subject anyone reaches for an implicit surface to
+  // build -- that is worse than the assembled primitives it was meant to replace.
+  //
+  // Naive surface nets places ONE vertex per sign-changing cell, at the average of the linearly
+  // interpolated crossings on that cell's edges, and joins the four cells around each crossing
+  // edge into a quad. It is compact, manifold, and smooth, and it is a natural fit for a field
+  // that can be sampled anywhere rather than only at corners.
+  //
+  // Normals come from the field GRADIENT, not from face averaging: the gradient is the exact
+  // surface normal of the implicit surface, so shading no longer carries the grid's imprint.
   const resolution = Math.max(4, Math.min(64, Math.floor(descriptor.resolution)));
   const defaultBounds: { readonly min: SdfVector; readonly max: SdfVector } = { min: [-2, -2, -2], max: [2, 2, 2] };
   const bounds = descriptor.bounds ?? defaultBounds;
@@ -862,55 +878,125 @@ function polygonizeSdf(descriptor: SdfDescriptor): THREE.BufferGeometry {
     (bounds.max[1] - bounds.min[1]) / resolution,
     (bounds.max[2] - bounds.min[2]) / resolution,
   );
-  const field = new Float32Array(resolution * resolution * resolution);
   const sample = sdfSample(descriptor);
-  const indexAt = (x: number, y: number, z: number): number => (z * resolution + y) * resolution + x;
-  for (let z = 0; z < resolution; z += 1) {
-    for (let y = 0; y < resolution; y += 1) {
-      for (let x = 0; x < resolution; x += 1) {
-        field[indexAt(x, y, z)] = sample(new THREE.Vector3(
-          min.x + (x + 0.5) * step.x,
-          min.y + (y + 0.5) * step.y,
-          min.z + (z + 0.5) * step.z,
-        ));
+  const scratch = new THREE.Vector3();
+
+  // Corner grid: one more corner than cells on each axis.
+  const side = resolution + 1;
+  const field = new Float32Array(side * side * side);
+  const cornerAt = (x: number, y: number, z: number): number => (z * side + y) * side + x;
+  for (let z = 0; z < side; z += 1) {
+    for (let y = 0; y < side; y += 1) {
+      for (let x = 0; x < side; x += 1) {
+        scratch.set(min.x + x * step.x, min.y + y * step.y, min.z + z * step.z);
+        field[cornerAt(x, y, z)] = sample(scratch);
       }
     }
   }
+
+  // The 12 cell edges as corner-offset pairs.
+  const CUBE_EDGES: readonly (readonly [number, number, number, number, number, number])[] = [
+    [0, 0, 0, 1, 0, 0], [1, 0, 0, 1, 1, 0], [0, 1, 0, 1, 1, 0], [0, 0, 0, 0, 1, 0],
+    [0, 0, 1, 1, 0, 1], [1, 0, 1, 1, 1, 1], [0, 1, 1, 1, 1, 1], [0, 0, 1, 0, 1, 1],
+    [0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 1], [1, 1, 0, 1, 1, 1], [0, 1, 0, 0, 1, 1],
+  ];
+
   const positions: number[] = [];
+  const normals: number[] = [];
   const indices: number[] = [];
-  const vertices = new Map<string, number>();
-  const vertexAt = (x: number, y: number, z: number): number => {
-    const key = `${x},${y},${z}`;
-    const existing = vertices.get(key);
-    if (existing !== undefined) return existing;
-    const vertex = positions.length / 3;
-    positions.push(min.x + x * step.x, min.y + y * step.y, min.z + z * step.z);
-    vertices.set(key, vertex);
-    return vertex;
+  const cellVertex = new Int32Array(resolution * resolution * resolution).fill(-1);
+  const cellAt = (x: number, y: number, z: number): number => (z * resolution + y) * resolution + x;
+
+  // Central-difference gradient, stepped at a fraction of a cell so it follows the field rather
+  // than the grid.
+  const epsilon = Math.min(step.x, step.y, step.z) * 0.25;
+  const gradient = (point: THREE.Vector3): THREE.Vector3 => {
+    const gx = sample(scratch.set(point.x + epsilon, point.y, point.z))
+      - sample(scratch.set(point.x - epsilon, point.y, point.z));
+    const gy = sample(scratch.set(point.x, point.y + epsilon, point.z))
+      - sample(scratch.set(point.x, point.y - epsilon, point.z));
+    const gz = sample(scratch.set(point.x, point.y, point.z + epsilon))
+      - sample(scratch.set(point.x, point.y, point.z - epsilon));
+    const normal = new THREE.Vector3(gx, gy, gz);
+    // A point where the field is flat has no defined normal; +Y is arbitrary but finite, and
+    // leaving a zero vector would poison every lighting calculation downstream.
+    return normal.lengthSq() < 1e-20 ? new THREE.Vector3(0, 1, 0) : normal.normalize();
   };
-  const addFace = (a: number, b: number, c: number, d: number): void => {
-    indices.push(a, b, c, a, c, d);
-  };
-  const inside = (x: number, y: number, z: number): boolean => (
-    x >= 0 && y >= 0 && z >= 0 && x < resolution && y < resolution && z < resolution && field[indexAt(x, y, z)] <= 0
-  );
+
   for (let z = 0; z < resolution; z += 1) {
     for (let y = 0; y < resolution; y += 1) {
       for (let x = 0; x < resolution; x += 1) {
-        if (!inside(x, y, z)) continue;
-        if (!inside(x - 1, y, z)) addFace(vertexAt(x, y, z), vertexAt(x, y, z + 1), vertexAt(x, y + 1, z + 1), vertexAt(x, y + 1, z));
-        if (!inside(x + 1, y, z)) addFace(vertexAt(x + 1, y, z), vertexAt(x + 1, y + 1, z), vertexAt(x + 1, y + 1, z + 1), vertexAt(x + 1, y, z + 1));
-        if (!inside(x, y - 1, z)) addFace(vertexAt(x, y, z), vertexAt(x + 1, y, z), vertexAt(x + 1, y, z + 1), vertexAt(x, y, z + 1));
-        if (!inside(x, y + 1, z)) addFace(vertexAt(x, y + 1, z), vertexAt(x, y + 1, z + 1), vertexAt(x + 1, y + 1, z + 1), vertexAt(x + 1, y + 1, z));
-        if (!inside(x, y, z - 1)) addFace(vertexAt(x, y, z), vertexAt(x, y + 1, z), vertexAt(x + 1, y + 1, z), vertexAt(x + 1, y, z));
-        if (!inside(x, y, z + 1)) addFace(vertexAt(x, y, z + 1), vertexAt(x + 1, y, z + 1), vertexAt(x + 1, y + 1, z + 1), vertexAt(x, y + 1, z + 1));
+        let crossings = 0;
+        let sumX = 0;
+        let sumY = 0;
+        let sumZ = 0;
+        for (const [ax, ay, az, bx, by, bz] of CUBE_EDGES) {
+          const a = field[cornerAt(x + ax, y + ay, z + az)];
+          const b = field[cornerAt(x + bx, y + by, z + bz)];
+          if ((a <= 0) === (b <= 0)) continue;
+          const t = a / (a - b);
+          sumX += (ax + (bx - ax) * t);
+          sumY += (ay + (by - ay) * t);
+          sumZ += (az + (bz - az) * t);
+          crossings += 1;
+        }
+        if (crossings === 0) continue;
+        const px = min.x + (x + sumX / crossings) * step.x;
+        const py = min.y + (y + sumY / crossings) * step.y;
+        const pz = min.z + (z + sumZ / crossings) * step.z;
+        cellVertex[cellAt(x, y, z)] = positions.length / 3;
+        positions.push(px, py, pz);
+        const normal = gradient(new THREE.Vector3(px, py, pz));
+        normals.push(normal.x, normal.y, normal.z);
       }
     }
   }
+
+  // One quad per sign-changing grid edge, joining the four cells that share it.
+  //
+  // Winding, worked out rather than guessed. For the +x edge from corner (x,y,z), the four cells
+  // around it are (x, y-1, z-1), (x, y, z-1), (x, y, z), (x, y-1, z); in the (y,z) plane that
+  // traversal is +y, +z, -y, whose cross product is +x. So when the corner is INSIDE and its
+  // neighbour is outside, the unflipped order already faces out, and the flip belongs on the
+  // opposite case. Getting this backwards is invisible in the normals -- those come from the
+  // gradient and stay correct -- and shows only as back-face culling removing the front surface,
+  // i.e. the model rendering as a hollow shell with its interior visible.
+  const quad = (a: number, b: number, c: number, d: number, flip: boolean): void => {
+    if (a < 0 || b < 0 || c < 0 || d < 0) return;
+    if (flip) indices.push(a, c, b, a, d, c);
+    else indices.push(a, b, c, a, c, d);
+  };
+  for (let z = 0; z < side; z += 1) {
+    for (let y = 0; y < side; y += 1) {
+      for (let x = 0; x < side; x += 1) {
+        const here = field[cornerAt(x, y, z)] <= 0;
+        if (x + 1 < side && y > 0 && z > 0 && here !== (field[cornerAt(x + 1, y, z)] <= 0)) {
+          quad(
+            cellVertex[cellAt(x, y - 1, z - 1)], cellVertex[cellAt(x, y, z - 1)],
+            cellVertex[cellAt(x, y, z)], cellVertex[cellAt(x, y - 1, z)], !here,
+          );
+        }
+        if (y + 1 < side && x > 0 && z > 0 && here !== (field[cornerAt(x, y + 1, z)] <= 0)) {
+          quad(
+            cellVertex[cellAt(x - 1, y, z - 1)], cellVertex[cellAt(x - 1, y, z)],
+            cellVertex[cellAt(x, y, z)], cellVertex[cellAt(x, y, z - 1)], !here,
+          );
+        }
+        if (z + 1 < side && x > 0 && y > 0 && here !== (field[cornerAt(x, y, z + 1)] <= 0)) {
+          quad(
+            cellVertex[cellAt(x - 1, y - 1, z)], cellVertex[cellAt(x, y - 1, z)],
+            cellVertex[cellAt(x, y, z)], cellVertex[cellAt(x - 1, y, z)], !here,
+          );
+        }
+      }
+    }
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
-  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 }"""
 
@@ -1493,6 +1579,141 @@ function applyRootTipGradient(
   geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
 }
 '''
+
+
+_VERTEX_PAINT_HELPER_SOURCE = '''\
+// Paint declared colour regions into the vertex-colour attribute.
+//
+// WHY VERTEX COLOUR AND NOT A TEXTURE. A subject whose identity is a set of flat colour regions
+// with hard boundaries -- a blaze, a bib, a sock, a livery stripe -- needs those boundaries placed
+// to a measured position. This pipeline emits code and no image assets, so a texture is not
+// available to place them with; a single root-to-tip ramp cannot express a shaped region. Per-
+// vertex colour driven by a declared shape is the remaining honest representation, and it is the
+// one the boundary gate can measure BEFORE a browser is involved.
+//
+// The maths here is a transcription of forge/_shared/vertex_paint.py, and
+// forge/tests/test_vertex_paint.py holds the two to the same numbers on a fixture. Editing one
+// side without the other turns a gated boundary into an ungated one, which is exactly the failure
+// the shared implementation exists to prevent.
+//
+// Regions are evaluated in the component's own local space AFTER its real dimensions have been
+// applied to the vertex data, so every coordinate below is in the same units as the component's
+// measured dimensions rather than in a unit cube.
+type VertexPaintRegion = {
+  id: string;
+  kind: 'axis-band' | 'ellipsoid' | 'tapered-capsule';
+  color: string;
+  softness: number;
+  axis?: 'x' | 'y' | 'z';
+  min?: number;
+  max?: number;
+  center?: [number, number, number];
+  radii?: [number, number, number];
+  start?: [number, number, number];
+  end?: [number, number, number];
+  startRadius?: number;
+  endRadius?: number;
+};
+
+function vertexPaintSmoothstep(edge0: number, edge1: number, value: number): number {
+  if (edge1 <= edge0) return value < edge1 ? 0 : 1;
+  let t = (value - edge0) / (edge1 - edge0);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return t * t * (3 - 2 * t);
+}
+
+function vertexPaintSignedDistance(
+  region: VertexPaintRegion,
+  x: number,
+  y: number,
+  z: number,
+): number {
+  if (region.kind === 'axis-band') {
+    const value = region.axis === 'x' ? x : region.axis === 'z' ? z : y;
+    const low = region.min as number;
+    const high = region.max as number;
+    if (value < low) return low - value;
+    if (value > high) return value - high;
+    return -Math.min(value - low, high - value);
+  }
+  if (region.kind === 'ellipsoid') {
+    const [cx, cy, cz] = region.center as [number, number, number];
+    const [rx, ry, rz] = region.radii as [number, number, number];
+    const q = Math.sqrt(
+      ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2,
+    );
+    return (q - 1) * Math.min(rx, ry, rz);
+  }
+  const [ax, ay, az] = region.start as [number, number, number];
+  const [bx, by, bz] = region.end as [number, number, number];
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const denominator = abx * abx + aby * aby + abz * abz;
+  let t = denominator > 0
+    ? ((x - ax) * abx + (y - ay) * aby + (z - az) * abz) / denominator
+    : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const distance = Math.sqrt(
+    (x - (ax + abx * t)) ** 2 + (y - (ay + aby * t)) ** 2 + (z - (az + abz * t)) ** 2,
+  );
+  const startRadius = region.startRadius as number;
+  const endRadius = region.endRadius as number;
+  return distance - (startRadius + (endRadius - startRadius) * t);
+}
+
+function vertexPaintWeight(region: VertexPaintRegion, x: number, y: number, z: number): number {
+  const distance = vertexPaintSignedDistance(region, x, y, z);
+  if (region.softness <= 0) return distance <= 0 ? 1 : 0;
+  return 1 - vertexPaintSmoothstep(-region.softness * 0.5, region.softness * 0.5, distance);
+}
+
+function applyVertexPaint(
+  geometry: THREE.BufferGeometry,
+  baseColor: string,
+  regions: VertexPaintRegion[],
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const values = new Float32Array(position.count * 3);
+  const base = new THREE.Color(baseColor);
+  const target = new THREE.Color();
+  const mixed = new THREE.Color();
+  const regionColors = regions.map((region) => new THREE.Color(region.color));
+
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    mixed.copy(base);
+    for (let r = 0; r < regions.length; r += 1) {
+      const weight = vertexPaintWeight(regions[r], x, y, z);
+      if (weight <= 0) continue;
+      target.copy(regionColors[r]);
+      mixed.lerp(target, weight);
+    }
+    values[i * 3] = mixed.r;
+    values[i * 3 + 1] = mixed.g;
+    values[i * 3 + 2] = mixed.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(values, 3));
+}
+'''
+
+
+def vertex_paint(component: dict[str, Any]) -> dict[str, Any] | None:
+    """A component's declared colour-region paint, or None.
+
+    Raises rather than degrading to flat colour when the declaration is malformed. A boundary that
+    silently vanishes is the failure mode this whole subsystem exists to remove: the render still
+    looks like a cat, the gate still finds a mesh, and the identity feature is simply not there.
+    """
+    paint = component.get("vertexPaint")
+    if paint is None:
+        return None
+    try:
+        return normalize_vertex_paint(paint, f"component {component.get('id')!r} vertexPaint")
+    except VertexPaintError as error:
+        raise ValueError(str(error)) from error
 
 
 def root_tip_gradient(component: dict[str, Any]) -> dict[str, Any] | None:
@@ -2216,6 +2437,9 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
     if any(root_tip_gradient(component) for component in components):
         lines.extend(_ROOT_TIP_GRADIENT_HELPER_SOURCE.splitlines())
         lines.append("")
+    if any(vertex_paint(component) for component in components):
+        lines.extend(_VERTEX_PAINT_HELPER_SOURCE.splitlines())
+        lines.append("")
 
     has_subdivision = any(subdivision_iterations(component) > 0 for component in components)
     has_decimation = any(decimate_ratio(component) is not None for component in components)
@@ -2585,9 +2809,19 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                 "    const b0 = ringStart[i + 1];",
                 "    if (isPoint[i] && isPoint[i + 1]) continue;   // two collapsed stations bound nothing",
                 "    for (let j = 0; j < radial; j += 1) {",
-                "      if (isPoint[i]) indices.push(a0, b0 + j, b0 + j + 1);",
-                "      else if (isPoint[i + 1]) indices.push(a0 + j, b0, a0 + j + 1);",
-                "      else indices.push(a0 + j, b0 + j, a0 + j + 1, a0 + j + 1, b0 + j, b0 + j + 1);",
+                "      // Wound so the face normal points radially OUTWARD.",
+                "      //",
+                "      // Ring vertices advance from `normal` toward `binormal`, and binormal is",
+                "      // tangent x normal, so increasing theta runs counter-clockwise seen from the",
+                "      // far end of the segment. Taking the ring-to-ring edge first therefore puts",
+                "      // the cross product on the inside. Measured as signed volume on the built",
+                "      // mesh: every tapered-sweep came out negative -- a torso at -0.0674 and a",
+                "      // tail at -0.0044 against a positive ellipsoid head -- so every sweep this",
+                "      // generator has ever emitted rendered its back faces, with normals pointing",
+                "      // into the solid and every lighting judgement made on the wrong surface.",
+                "      if (isPoint[i]) indices.push(a0, b0 + j + 1, b0 + j);",
+                "      else if (isPoint[i + 1]) indices.push(a0 + j, a0 + j + 1, b0);",
+                "      else indices.push(a0 + j, a0 + j + 1, b0 + j, a0 + j + 1, b0 + j + 1, b0 + j);",
                 "    }",
                 "  }",
                 "",
@@ -2704,8 +2938,14 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "",
         "function clampedAlbedoColor(spec: SculptMaterialSpec): THREE.Color {",
         "  const source = typeof spec.baseColor === 'string' ? spec.baseColor : '#8A7A5F';",
-        "  const [red, green, blue] = hexToRgb(source);",
-        "  return new THREE.Color(red / 255, green / 255, blue / 255);",
+        "  // setStyle with an explicit SRGBColorSpace, NOT the numeric constructor.",
+        "  //",
+        "  // `new THREE.Color(r, g, b)` treats its arguments as LINEAR working-space components,",
+        "  // while an authored `baseColor` hex is sRGB. Feeding one to the other skipped the",
+        "  // transfer function and lifted every dark albedo: #2e2a28, authored as a near-black",
+        "  // vinyl, rendered at roughly sRGB 0.46 — a mid grey. The error is largest exactly where",
+        "  // it matters most, because the transfer curve is steepest near black.",
+        "  return new THREE.Color().setStyle(source, THREE.SRGBColorSpace);",
         "}",
         "",
         "function smoothCurve(value: number): number {",
@@ -3063,7 +3303,17 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         "}",
         "",
         "function createSculptMaterial(id: string, spec: SculptMaterialSpec, options: ProceduralModelOptions, denseComponent = false): THREE.MeshPhysicalMaterial {",
-        "  const textures = makeReferenceTextureSet(spec, options) ?? makeProceduralTextureSet(id, spec, options);",
+        "  // A material that declares -- with evidence -- that its subject carries no texture",
+        "  // detail gets NO texture set. Synthesising one anyway is not a harmless default: the",
+        "  // branch below then forces color to white and roughness to 1 and reads both from the",
+        "  // generated maps, so the authored albedo and the reference-derived roughness are both",
+        "  // discarded, and the model gains mottling the reference does not have. Measured on the",
+        "  // tuxedo cat, whose black fur rendered as speckled grey-and-white from a palette that",
+        "  // only ever described two flat regions.",
+        "  const textureless = (spec.textureless as { declared?: boolean } | undefined)?.declared === true;",
+        "  const textures = textureless",
+        "    ? null",
+        "    : makeReferenceTextureSet(spec, options) ?? makeProceduralTextureSet(id, spec, options);",
         "  const material = new THREE.MeshPhysicalMaterial({",
         "    color: textures ? 0xffffff : clampedAlbedoColor(spec),",
         "    roughness: textures ? 1 : clamp01(readLayerNumber(spec.roughness, ['base'], 0.76)),",
@@ -3312,8 +3562,40 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
         lines.extend(
             [
                 "",
-                f"  const {attachment_var} = {json.dumps(attachment, ensure_ascii=False)};",
-                f"  const {endpoint_var} = makeAttachmentEndpoint({attachment_var});",
+                *(
+                    [f"  const {attachment_var} = {json.dumps(attachment, ensure_ascii=False)};"]
+                    if primitive in ATTACHMENT_PRIMITIVES and not is_implicit
+                    else []
+                ),
+                # Endpoint-DERIVED GEOMETRY only for primitives that are attachment shapes.
+                #
+                # An `attachment` block is a contract -- parent socket, contact type, embed depth,
+                # local start and end -- and the structural pass requires one on every child
+                # appendage. It is NOT a statement that the part is a tapered cylinder. Deriving
+                # geometry from it unconditionally silently overrode the authored primitive: an
+                # ellipsoid head, a tapered-sweep ear and a swept tail all came out as cylinders
+                # between their two endpoints, the spec validated, the factory built, and the
+                # wrong shape shipped. That is the same failure mode `GeometryNotImplementedError`
+                # exists to prevent one step earlier.
+                #
+                # So the branch is gated on ATTACHMENT_PRIMITIVES. Every other primitive keeps the
+                # geometry it declared and uses the attachment as what it is: a contract the
+                # anchor gate reads.
+                (
+                    f"  const {endpoint_var} = makeAttachmentEndpoint({attachment_var});"
+                    # `not is_implicit` as well as the primitive test. An implicit component's
+                    # geometry comes from the SDF and its placement from its own transform, but it
+                    # still has to declare SOME `primitive` -- the shipped fixture uses "capsule" --
+                    # and that lands it in ATTACHMENT_PRIMITIVES. Taking the endpoint branch then
+                    # moved the node to `attachment.localStart`: a head authored at y 0.705 was
+                    # emitted at y -0.195, inside the body, and the model rendered with no head at
+                    # all.
+                    if primitive in ATTACHMENT_PRIMITIVES and not is_implicit
+                    # `makeAttachmentEndpoint(null)` rather than a bare `null`, so the
+                    # binding keeps its `AttachmentEndpoint | null` type. A literal null narrows to
+                    # `never` and every later `endpoint.start` stops compiling.
+                    else f"  const {endpoint_var} = makeAttachmentEndpoint(null);"
+                ),
                 f"  const {node_var} = new THREE.Group();",
                 f"  {node_var}.name = {json.dumps(name + '__pivot')};",
                 # PLAN_1.5 WS-E: the hierarchy transform (this pivot Group) never carries
@@ -3360,6 +3642,15 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                     if (gradient := root_tip_gradient(component))
                     else []
                 ),
+                *(
+                    [
+                        f"  applyVertexPaint({component_var}Geometry, "
+                        f"{json.dumps(paint['baseColor'])}, "
+                        f"{json.dumps(paint['regions'], ensure_ascii=False)});"
+                    ]
+                    if (paint := vertex_paint(component))
+                    else []
+                ),
                 f"  const {component_var} = new THREE."
                 f"{'SkinnedMesh' if component_id in skinned_ids else 'Mesh'}(",
                 f"    {component_var}Geometry,",
@@ -3373,7 +3664,28 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
                         f"  {component_var}.material = {component_var}.material.clone();",
                         f"  {component_var}.material.vertexColors = true;",
                     ]
-                    if root_tip_gradient(component)
+                    if root_tip_gradient(component) or vertex_paint(component)
+                    else []
+                ),
+                # With vertexColors on, three MULTIPLIES material.color by the vertex colour. A
+                # paint block already carries the component's full albedo -- its own baseColor for
+                # the unpainted surface and a region colour where a region claims it -- so leaving
+                # the material's albedo in place squares it. Measured: a 0.027 linear black fur
+                # against a 0.027 black material renders at 0.0007, and the white sock authored at
+                # 0.937 comes out at 0.025, i.e. darker than the fur is supposed to be. The region
+                # boundary is still exactly where the gate measures it, and is invisible.
+                #
+                # Only for `vertexPaint`. `rootTipGradient` is a SHADING ramp that is meant to
+                # modulate the material's own colour, so it keeps the multiply.
+                *(
+                    # Cast: `Mesh.material` is typed `Material | Material[]`, and `color`
+                    # lives on the concrete material rather than on the base class. `vertexColors`
+                    # above needs no cast because it IS on `Material`.
+                    [
+                        f"  ({component_var}.material as THREE.MeshPhysicalMaterial)"
+                        ".color.setRGB(1, 1, 1);"
+                    ]
+                    if vertex_paint(component)
                     else []
                 ),
                 f"  if ({endpoint_var}) {{",
@@ -3421,8 +3733,47 @@ def generate(spec: dict[str, Any], pass_id: str) -> str:
     # same macro/meso/micro levels as componentTree so blockout stays clay-macro.
     allowed_levels = PASS_LEVELS.get(pass_id, {"macro"})
     known_ids = {str(c.get("id")) for c in all_components if isinstance(c, dict)}
+    # Ids that already exist as built geometry: components in their own right, plus the SDF
+    # primitives that make up an implicit component. A repetition system naming these is describing
+    # parts that have already been authored, not asking for new ones.
+    realised_ids = set(known_ids)
+    for component in all_components:
+        if not isinstance(component, dict):
+            continue
+        descriptor = component.get("geometryDescriptor")
+        sdf = descriptor.get("sdf") if isinstance(descriptor, dict) else None
+        for primitive in (sdf or {}).get("primitives", []) or []:
+            if isinstance(primitive, dict) and primitive.get("id"):
+                realised_ids.add(str(primitive["id"]))
+
     for rep_index, system in enumerate(spec.get("repetitionSystems", [])):
         if not isinstance(system, dict):
+            continue
+        # A repetition system whose members are ALL already built is documentation, not an
+        # instruction, and instancing it emits a second copy of parts that exist.
+        #
+        # The tuxedo cat declares limb-set, whisker-set and toe-set with elementComponentIds naming
+        # the four legs (SDF primitives inside the fused body), the eight whiskers and the six toes
+        # (each an authored component that already emits its own mesh), and a PROSE placement —
+        # "three per front paw at x offsets -0.040, 0.0, +0.040" — rather than a {mode, axis,
+        # radius} object. The emitter below reads that string as an empty dict and falls through to
+        # its defaults, so each system came out as an InstancedMesh of unit BOXES centred on the
+        # origin, spanning -0.5..0.5 on every axis.
+        #
+        # That is not merely ugly. geometry.json is measured by run_geometry_gates.py, and the
+        # boxes dragged the model's minimum Y from 0.0012 to -0.5 — half a unit underground — so
+        # belly-clearance-over-torso-depth was computed against a ground line that does not exist
+        # and "failed" for a reason that had nothing to do with the belly.
+        #
+        # Skipping requires ALL members to be realised, so a genuine instancing system — whose
+        # members are deliberately not authored one by one — still emits.
+        element_ids = [str(e) for e in (system.get("elementComponentIds") or []) if e]
+        if element_ids and all(e in realised_ids for e in element_ids):
+            lines.append(
+                f"  // repetition system {json.dumps(str(system.get('id') or f'rep_{rep_index}'))} "
+                f"describes {len(element_ids)} parts that are already built individually; "
+                "not instanced."
+            )
             continue
         level = str(system.get("level") or "meso")
         if level not in allowed_levels:
