@@ -405,10 +405,14 @@ Two chirality defects can ship in one figure and need **different** tests, which
   *and* z is a 180° rotation, and rotation preserves handedness, so both limbs come out the same
   hand. It names the relation (`rotation` / `translation` / `unrelated`) rather than saying
   "mismatch", because the two are trivially confused and agree exactly on a symmetric part.
+  Measured on the humanoid: the thumb tip sat at z ±0.288 across the pair where a mirror leaves z
+  alone; fixing it moved the hand region **46% closer** to the reference in front view.
 - `medial_lateral_bias()` + `compare_bias()` — needs a reference. Catches what a pair test
   structurally cannot: a pair wrong the *same* way on both sides is still a perfect mirror of
   itself. Only the **sign** of the bias is judged; a magnitude difference is a proportion issue that
-  other gates own. Below `MIN_REFERENCE_BIAS` (0.025) the reference is treated as too symmetric to
+  other gates own. Measured on the humanoid: toes ordered little-to-big across a strip whose index 0
+  is medial put the big toe outboard on *both* feet — toe-band mass reference 529 medial / 488
+  lateral, ours 350 / 443 — and a foot with its big toe outside is the other foot. Below `MIN_REFERENCE_BIAS` (0.025) the reference is treated as too symmetric to
   judge handedness from.
 
 `CHARACTER_LEFT_SIGN` is the convention as code: with `forward: +Z`, Y up and a right-handed frame,
